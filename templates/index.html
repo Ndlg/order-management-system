@@ -1,11 +1,711 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <title>订单整理管理系统</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>订单整理系统 Web服务</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --line: #d9e2ec;
+      --line-strong: #b8c7d8;
+      --text: #182331;
+      --muted: #66758a;
+      --blue: #2563a8;
+      --blue-dark: #174a7c;
+      --green: #16805f;
+      --red: #b42318;
+      --amber: #9a6700;
+      --shadow: 0 14px 34px rgba(24, 35, 49, .08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    button, select, input { font: inherit; }
+
+    .shell {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      background: #dbeafe;
+      color: var(--blue-dark);
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      border: 1px solid #b7d4f5;
+      flex: 0 0 auto;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.25;
+      font-weight: 800;
+    }
+
+    .meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(320px, .8fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-title {
+      font-size: 16px;
+      font-weight: 800;
+      margin: 0;
+    }
+
+    .panel-body { padding: 20px; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+      min-height: 84px;
+    }
+
+    .stat .label {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 7px;
+    }
+
+    .stat .value {
+      font-size: 24px;
+      line-height: 1;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .field { min-width: 0; }
+
+    .field.full { grid-column: 1 / -1; }
+
+    label {
+      display: block;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #263548;
+    }
+
+    select {
+      width: 100%;
+      height: 42px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+      padding: 0 12px;
+      outline: none;
+    }
+
+    select:focus,
+    .file-zone:focus-within {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(37, 99, 168, .14);
+    }
+
+    .file-input {
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      position: absolute;
+      pointer-events: none;
+    }
+
+    .file-zone {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 88px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 8px;
+      background: var(--surface-soft);
+      padding: 16px;
+      cursor: pointer;
+    }
+
+    .file-main {
+      min-width: 0;
+    }
+
+    .file-title {
+      font-weight: 800;
+      margin-bottom: 5px;
+    }
+
+    .file-detail {
+      color: var(--muted);
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 100%;
+    }
+
+    .mode-group {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .mode-option input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .mode-option span {
+      display: grid;
+      place-items: center;
+      min-height: 42px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: #fff;
+      color: #2b3b4f;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 0 10px;
+      text-align: center;
+    }
+
+    .mode-option input:checked + span {
+      border-color: var(--blue);
+      color: #fff;
+      background: var(--blue);
+    }
+
+    .btn {
+      height: 42px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 0 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-weight: 800;
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .btn.primary {
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .btn.primary:hover { background: var(--blue-dark); }
+
+    .btn.secondary {
+      color: var(--blue-dark);
+      background: #fff;
+      border-color: var(--line-strong);
+    }
+
+    .btn.secondary:hover { background: #eef5ff; }
+
+    .btn:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .status {
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface-soft);
+      padding: 16px;
+      min-height: 160px;
+      white-space: pre-wrap;
+      color: #334155;
+      line-height: 1.65;
+      overflow-wrap: anywhere;
+    }
+
+    .status.ok {
+      border-color: #9fd7c2;
+      background: #effaf5;
+      color: #0f5f48;
+    }
+
+    .status.err {
+      border-color: #f3b6ad;
+      background: #fff4f2;
+      color: var(--red);
+    }
+
+    .status-title {
+      font-weight: 800;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .download-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid #bde1cf;
+    }
+
+    .download-name {
+      font-weight: 800;
+      color: #0f5f48;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .download-link {
+      background: var(--green);
+      color: #fff;
+      border-radius: 8px;
+      min-width: 128px;
+    }
+
+    .side-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .info-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .info-row:last-child { border-bottom: 0; }
+
+    .info-label { color: var(--muted); }
+
+    .info-value {
+      font-weight: 800;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 8px;
+      background: #eef5ff;
+      color: var(--blue-dark);
+      border: 1px solid #c5dbf5;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,.5);
+      border-top-color: #fff;
+      border-radius: 50%;
+      display: none;
+      animation: spin .8s linear infinite;
+    }
+
+    .btn.loading .spinner { display: inline-block; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 880px) {
+      .shell { padding: 16px; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .top-actions { justify-content: flex-start; }
+      .layout { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: 1fr; }
+      .form-grid { grid-template-columns: 1fr; }
+      .mode-group { grid-template-columns: 1fr; }
+      .file-zone { align-items: stretch; flex-direction: column; }
+      .download-box { align-items: stretch; flex-direction: column; }
+      .download-link { width: 100%; }
+    }
+  </style>
 </head>
 <body>
-    <h1>订单整理管理系统 V7.4.7</h1>
-    <p>Web 控制台初始化页面。</p>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">订</div>
+        <div>
+          <h1>订单整理系统</h1>
+          <div id="webversion" class="meta">Web后端版本：读取中</div>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="systemTag" class="tag">系统读取中</span>
+        <button class="btn secondary" type="button" onclick="refreshAll()">刷新状态</button>
+      </div>
+    </header>
+
+    <section class="stats" aria-label="系统状态">
+      <div class="stat">
+        <div class="label">分类规则</div>
+        <div id="categoryCount" class="value">-</div>
+      </div>
+      <div class="stat">
+        <div class="label">档口规则</div>
+        <div id="stallCount" class="value">-</div>
+      </div>
+      <div class="stat">
+        <div class="label">图片关系</div>
+        <div id="imageCount" class="value">-</div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">生成整理文档</h2>
+          <span id="templateTag" class="tag">模板读取中</span>
+        </div>
+        <div class="panel-body">
+          <div class="form-grid">
+            <div class="field full">
+              <label for="files">订单 Excel</label>
+              <label class="file-zone" for="files">
+                <span class="file-main">
+                  <span class="file-title">选择或拖入订单文件</span>
+                  <span id="fileDetail" class="file-detail">支持多选 .xlsx / .xls</span>
+                </span>
+                <span class="btn secondary">选择文件</span>
+              </label>
+              <input id="files" class="file-input" type="file" multiple accept=".xlsx,.xls" />
+            </div>
+
+            <div class="field">
+              <label for="template">导入模板</label>
+              <select id="template">
+                <option value="">读取中...</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label>输出方式</label>
+              <div class="mode-group" role="radiogroup" aria-label="输出方式">
+                <label class="mode-option">
+                  <input type="radio" name="mode" value="合并一个Sheet" />
+                  <span>合并Sheet</span>
+                </label>
+                <label class="mode-option">
+                  <input type="radio" name="mode" value="按档口分Sheet" checked />
+                  <span>档口Sheet</span>
+                </label>
+                <label class="mode-option">
+                  <input type="radio" name="mode" value="按档口分文档" />
+                  <span>档口文档</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="btn" class="btn primary" type="button" onclick="generate()">
+              <span class="spinner"></span>
+              <span id="btnText">生成整理文档</span>
+            </button>
+            <button class="btn secondary" type="button" onclick="openOutput()">服务器本机打开目录</button>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">运行状态</h2>
+        </div>
+        <div class="panel-body">
+          <div id="status" class="status">
+            <div class="status-title">等待操作</div>
+            选择订单 Excel 后即可生成整理文档。
+          </div>
+          <div class="side-list" style="margin-top:16px;">
+            <div class="info-row">
+              <span class="info-label">当前系统</span>
+              <span id="systemName" class="info-value">-</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">当前模板</span>
+              <span id="activeTemplate" class="info-value">-</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+<script>
+const filesInput = document.getElementById('files');
+const fileDetail = document.getElementById('fileDetail');
+const statusEl = document.getElementById('status');
+const buttonEl = document.getElementById('btn');
+const buttonText = document.getElementById('btnText');
+
+function currentMode() {
+  const checked = document.querySelector('input[name="mode"]:checked');
+  return checked ? checked.value : '按档口分Sheet';
+}
+
+function setStatus(type, title, message) {
+  statusEl.className = `status ${type || ''}`.trim();
+  statusEl.textContent = '';
+  const titleEl = document.createElement('div');
+  titleEl.className = 'status-title';
+  titleEl.textContent = title;
+  statusEl.appendChild(titleEl);
+  if (message) {
+    statusEl.appendChild(document.createTextNode(message));
+  }
+}
+
+function setSuccessDownload(title, message, filename, url, label) {
+  setStatus('ok', title, message);
+  const box = document.createElement('div');
+  box.className = 'download-box';
+
+  const name = document.createElement('div');
+  name.className = 'download-name';
+  name.textContent = filename || '整理文档';
+
+  const link = document.createElement('a');
+  link.className = 'btn download-link';
+  link.href = url;
+  link.textContent = label || '下载';
+
+  box.appendChild(name);
+  box.appendChild(link);
+  statusEl.appendChild(box);
+}
+
+function setLoading(loading) {
+  buttonEl.disabled = loading;
+  buttonEl.classList.toggle('loading', loading);
+  buttonText.textContent = loading ? '正在生成' : '生成整理文档';
+}
+
+function updateFileDetail() {
+  const files = Array.from(filesInput.files || []);
+  if (!files.length) {
+    fileDetail.textContent = '支持多选 .xlsx / .xls';
+    return;
+  }
+  const totalMB = files.reduce((sum, file) => sum + file.size, 0) / 1024 / 1024;
+  fileDetail.textContent = `${files.length} 个文件，约 ${totalMB.toFixed(1)} MB`;
+}
+
+async function loadTemplates() {
+  const sel = document.getElementById('template');
+  try {
+    const r = await fetch('/api/templates');
+    const d = await r.json();
+    sel.innerHTML = '';
+
+    if (!d.ok || !d.templates || !d.templates.length) {
+      sel.innerHTML = '<option value="">未配置模板</option>';
+      document.getElementById('templateTag').textContent = '未配置模板';
+      return;
+    }
+
+    for (const t of d.templates) {
+      const opt = document.createElement('option');
+      opt.value = t.name;
+      opt.textContent = `${t.name}${t.mode ? '（' + t.mode + '）' : ''}`;
+      sel.appendChild(opt);
+    }
+
+    if (d.active_template) {
+      sel.value = d.active_template;
+    }
+    document.getElementById('templateTag').textContent = sel.value || '已加载模板';
+  } catch (e) {
+    sel.innerHTML = '<option value="">模板读取失败</option>';
+    document.getElementById('templateTag').textContent = '模板读取失败';
+  }
+}
+
+async function refreshStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+    document.getElementById('systemName').textContent = d.system_name || '-';
+    document.getElementById('systemTag').textContent = d.system_name || '未配置系统';
+    document.getElementById('activeTemplate').textContent = d.active_template || '-';
+    document.getElementById('webversion').textContent = `Web后端版本：${d.web_version || '未返回版本号'}`;
+    document.getElementById('categoryCount').textContent = d.category_rules ?? 0;
+    document.getElementById('stallCount').textContent = d.stall_rules ?? 0;
+    document.getElementById('imageCount').textContent = d.image_rules ?? 0;
+  } catch(e) {
+    setStatus('err', '状态读取失败', '请确认 Web 服务正在运行。');
+  }
+}
+
+async function refreshAll() {
+  await Promise.all([loadTemplates(), refreshStatus()]);
+}
+
+async function generate() {
+  const files = filesInput.files;
+  const template = document.getElementById('template').value;
+
+  if (!files.length) {
+    setStatus('err', '缺少订单文件', '请先选择订单 Excel。');
+    return;
+  }
+
+  if (!template) {
+    setStatus('err', '缺少导入模板', '请先选择导入模板。');
+    return;
+  }
+
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  fd.append('output_mode', currentMode());
+  fd.append('template_name', template);
+
+  setLoading(true);
+  setStatus('', '正在生成', '文件较多或包含图片时会多等一会儿。');
+
+  try {
+    const r = await fetch('/api/generate', { method:'POST', body: fd });
+    const d = await r.json();
+    if (!d.ok) {
+      const detail = [
+        d.error || '生成失败',
+        'Web后端版本：' + (d.web_version || '未返回版本号'),
+        '',
+        '定位信息：',
+        JSON.stringify(d.debug || {}, null, 2),
+        '',
+        d.traceback || ''
+      ].join('\n');
+      throw new Error(detail);
+    }
+
+    const downloadPath = d.download_path || d.path;
+    const downloadUrl = `/api/download?path=${encodeURIComponent(downloadPath)}`;
+    const title = d.is_dir ? '档口文档已打包' : '整理文档已生成';
+    const message = d.is_dir
+      ? `输出文件夹：${d.filename}\n全部档口文档已打包为压缩包。`
+      : `输出文件：${d.filename}`;
+    const label = d.is_dir ? '下载压缩包' : '下载文档';
+    setSuccessDownload(title, message, d.download_filename || d.filename, downloadUrl, label);
+  } catch(e) {
+    setStatus('err', '生成失败', e.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function openOutput() {
+  await fetch('/api/open-output');
+}
+
+filesInput.addEventListener('change', updateFileDetail);
+document.getElementById('template').addEventListener('change', (event) => {
+  document.getElementById('templateTag').textContent = event.target.value || '未选择模板';
+});
+
+refreshAll();
+</script>
 </body>
 </html>

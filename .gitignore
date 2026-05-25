@@ -1,17 +1,33 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-*.pyd
-*.log
-*.tmp
-*.bak
+
+# Build outputs
+build/
+dist/
+*.spec
+release/
+
+# Runtime data
+data/
+output/
+temp/
+uploads/
+browser_profile/
+sku_output/
+
+# Local files
 .env
 .venv/
 venv/
-dist/
-build/
-*.spec
+*.log
+
+# Packaged binaries and archives
 *.exe
 *.zip
-.DS_Store
-Thumbs.db
+*.7z
+*.rar
+
+# Office temporary files
+~$*

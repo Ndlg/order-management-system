@@ -1,5 +1,8 @@
-flask
-pandas
+﻿pandas
 openpyxl
-Pillow
+pillow
+cryptography
+fastapi
+uvicorn
+python-multipart
 pyinstaller
