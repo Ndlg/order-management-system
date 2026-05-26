@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 APP_TITLE = "web服务控制台"
-WEB_CONSOLE_VERSION = "V7.5.1-LiteData-20260525"
+WEB_CONSOLE_VERSION = "V7.6.1"
 
 
 def base_dir():

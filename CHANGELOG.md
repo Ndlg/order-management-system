@@ -1,5 +1,18 @@
 # Changelog
 
+## V7.6.1
+
+- Released the order editor workflow as the formal V7.6.1 project.
+- Kept the lightweight data model and original category/stall/image matching workflow.
+- Added the Order Recognition tab for importing 1688 order Excel files, reviewing detected category/spec/image status, editing category and keyword fields, and saving selected rows as category rules.
+- Added batch rule creation from imported orders, including keyword source choices such as product short name or sales spec.
+
+## V7.5.1-OrderEditor-20260526
+
+- Kept the V7.5.1 lightweight data model and original category/stall/image matching workflow.
+- Added an Order Recognition tab for importing 1688 order Excel files, reviewing detected category/spec/image status, editing category and keyword fields, and saving selected rows as category rules.
+- Added batch rule creation from imported orders, including keyword source choices such as product short name or sales spec.
+
 ## V7.5.1-LiteData-20260525
 
 - Reworked startup loading window into a determinate progress page with file size, decrypt/parse, and image-shard scan stages.

@@ -20,7 +20,16 @@ from order_secure_common import (
     get_data_file, get_data_dir, get_output_dir,
     backup_data_file, preview_data_summary,
     upsert_image_binding, delete_image_binding, clear_all_image_categories,
-    iter_image_bindings, image_storage_summary, list_image_category_names
+    iter_image_bindings, image_storage_summary, list_image_category_names,
+    ImageMatcher, load_image_map_for_categories
+)
+from order_core import (
+    RuleEngine,
+    extract_raw_spec,
+    extract_size,
+    get_template,
+    normalize_qty,
+    read_by_template,
 )
 
 
@@ -135,7 +144,7 @@ class LoadingWindow:
         self.root = root
         self.on_close = on_close
         self.win = tk.Toplevel(root)
-        self.win.title("订单整理管理系统 V7.5.1")
+        self.win.title("订单整理管理系统 V7.6.1")
         self.win.geometry("760x500")
         self.win.resizable(False, False)
         self.win.protocol("WM_DELETE_WINDOW", self.close_request)
@@ -341,6 +350,15 @@ class BackendAdmin:
         self.img_path = tk.StringVar()
         self.image_search_var = tk.StringVar()
         self.image_filter_category_var = tk.StringVar(value="全部分类")
+        self.order_review_rows = {}
+        self.order_review_files = []
+        self.order_review_template = tk.StringVar()
+        self.order_review_category = tk.StringVar()
+        self.order_review_keyword = tk.StringVar()
+        self.order_review_field = tk.StringVar(value="商品简称")
+        self.order_review_remove = tk.StringVar()
+        self.order_review_search = tk.StringVar()
+        self.order_review_show_known = tk.BooleanVar(value=True)
 
         self.build_ui()
         self.refresh_all()
@@ -364,18 +382,21 @@ class BackendAdmin:
         nb.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
         self.tab_templates = ttk.Frame(nb)
+        self.tab_order_review = ttk.Frame(nb)
         self.tab_rules = ttk.Frame(nb)
         self.tab_stalls = ttk.Frame(nb)
         self.tab_images = ttk.Frame(nb)
         self.tab_system = ttk.Frame(nb)
 
         nb.add(self.tab_templates, text="导入模板")
+        nb.add(self.tab_order_review, text="订单识别")
         nb.add(self.tab_rules, text="分类规则")
         nb.add(self.tab_stalls, text="档口规则")
         nb.add(self.tab_images, text="图片关系")
         nb.add(self.tab_system, text="系统维护")
 
         self.build_templates()
+        self.build_order_review()
         self.build_rules()
         self.build_stalls()
         self.build_images()
@@ -509,6 +530,96 @@ class BackendAdmin:
 
         self.template_tree.grid(row=2, column=0, sticky="nsew", padx=12, pady=8)
         self.template_tree.bind("<Double-1>", self.load_template)
+
+    def build_order_review(self):
+        self.tab_order_review.columnconfigure(0, weight=1)
+        self.tab_order_review.rowconfigure(2, weight=1)
+
+        top = ttk.LabelFrame(self.tab_order_review, text="从订单识别并补分类规则")
+        top.grid(row=0, column=0, sticky="ew", padx=12, pady=10)
+        top.columnconfigure(8, weight=1)
+
+        ttk.Label(
+            top,
+            text="保留原整理模式：先读取1688订单，查看当前识别结果，编辑后保存为分类规则。"
+        ).grid(row=0, column=0, columnspan=9, sticky="w", padx=8, pady=8)
+
+        ttk.Button(top, text="导入订单Excel", command=self.import_order_review_excel).grid(row=1, column=0, padx=8, pady=8)
+        ttk.Button(top, text="重新识别", command=self.reload_order_review).grid(row=1, column=1, padx=5)
+        ttk.Label(top, text="导入模板").grid(row=1, column=2, padx=5)
+        self.order_review_template_combo = ttk.Combobox(
+            top,
+            textvariable=self.order_review_template,
+            width=26,
+            state="readonly"
+        )
+        self.order_review_template_combo.grid(row=1, column=3, padx=5)
+        ttk.Button(top, text="保存选中规则", command=self.save_selected_order_review_rules).grid(row=1, column=4, padx=5)
+        ttk.Button(top, text="批量保存可确认", command=self.save_all_ready_order_review_rules).grid(row=1, column=5, padx=5)
+        ttk.Checkbutton(
+            top,
+            text="显示已识别",
+            variable=self.order_review_show_known,
+            command=self.refresh_order_review
+        ).grid(row=1, column=6, padx=5, sticky="w")
+
+        edit = ttk.LabelFrame(self.tab_order_review, text="编辑选中行要保存的规则")
+        edit.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 8))
+        edit.columnconfigure(7, weight=1)
+
+        ttk.Label(edit, text="分类/鞋款").grid(row=0, column=0, padx=5, pady=8)
+        ttk.Entry(edit, textvariable=self.order_review_category, width=22).grid(row=0, column=1, padx=5)
+        ttk.Label(edit, text="关键词").grid(row=0, column=2, padx=5)
+        ttk.Entry(edit, textvariable=self.order_review_keyword, width=26).grid(row=0, column=3, padx=5)
+        ttk.Label(edit, text="匹配位置").grid(row=0, column=4, padx=5)
+        ttk.Combobox(
+            edit,
+            textvariable=self.order_review_field,
+            values=["商品简称", "销售规格", "备注", "货品标题", "全部"],
+            state="readonly",
+            width=12
+        ).grid(row=0, column=5, padx=5)
+        ttk.Button(edit, text="关键词=商品简称", command=self.use_order_review_short_keyword).grid(row=0, column=6, padx=5)
+        ttk.Button(edit, text="关键词=销售规格", command=self.use_order_review_spec_keyword).grid(row=0, column=7, padx=5, sticky="w")
+
+        ttk.Label(edit, text="清洗关键词").grid(row=1, column=0, padx=5, pady=8)
+        ttk.Entry(edit, textvariable=self.order_review_remove, width=40).grid(row=1, column=1, columnspan=3, sticky="ew", padx=5)
+        ttk.Label(edit, text="搜索").grid(row=1, column=4, padx=5)
+        ttk.Entry(edit, textvariable=self.order_review_search).grid(row=1, column=5, columnspan=3, sticky="ew", padx=5)
+        self.order_review_search.trace_add("write", lambda *args: self.refresh_order_review())
+
+        table_frame = ttk.Frame(self.tab_order_review)
+        table_frame.grid(row=2, column=0, sticky="nsew", padx=12, pady=8)
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.rowconfigure(0, weight=1)
+
+        cols = ("状态", "商品简称", "当前分类", "销售规格", "尺码", "数量", "备注", "图片")
+        self.order_review_tree = ttk.Treeview(table_frame, columns=cols, show="headings", selectmode="extended")
+        widths = {
+            "状态": 80,
+            "商品简称": 170,
+            "当前分类": 130,
+            "销售规格": 260,
+            "尺码": 70,
+            "数量": 70,
+            "备注": 220,
+            "图片": 80,
+        }
+        for col in cols:
+            self.order_review_tree.heading(col, text=col)
+            self.order_review_tree.column(col, width=widths.get(col, 120), anchor="center" if col in {"状态", "尺码", "数量", "图片"} else "w")
+        self.order_review_tree.grid(row=0, column=0, sticky="nsew")
+        self.order_review_tree.bind("<<TreeviewSelect>>", self.load_order_review_selection)
+        self.order_review_tree.bind("<Double-1>", self.load_order_review_selection)
+
+        y_scroll = ttk.Scrollbar(table_frame, orient="vertical", command=self.order_review_tree.yview)
+        y_scroll.grid(row=0, column=1, sticky="ns")
+        self.order_review_tree.configure(yscrollcommand=y_scroll.set)
+
+        bottom = ttk.Frame(self.tab_order_review)
+        bottom.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 10))
+        self.order_review_count_label = ttk.Label(bottom, text="未导入订单")
+        self.order_review_count_label.pack(side="left", padx=5)
 
     def build_rules(self):
         self.tab_rules.columnconfigure(0, weight=1)
@@ -686,7 +797,7 @@ class BackendAdmin:
     def repair_old_data(self):
         if not messagebox.askyesno(
             "确认",
-            "即将备份并重建 V7.5.1 轻量主数据：\n\n"
+            "即将备份并重建轻量主数据：\n\n"
             "1. 主数据只保留模板、分类规则、档口规则和用户\n"
             "2. 图片关系继续保存在 data/image_categories 分类文件中\n"
             "3. 不再把图片关系写入 system_data.enc\n\n"
@@ -719,6 +830,8 @@ class BackendAdmin:
 
     def refresh_all(self):
         self.refresh_templates()
+        self.refresh_order_review_template_choices()
+        self.refresh_order_review()
         self.refresh_rules()
         self.refresh_stalls()
         self.refresh_categories()
@@ -739,6 +852,269 @@ class BackendAdmin:
             self.image_filter_category_combo["values"] = values
             if current not in values:
                 self.image_filter_category_var.set("全部分类")
+
+    def refresh_order_review_template_choices(self):
+        if not hasattr(self, "order_review_template_combo"):
+            return
+        names = [t.get("name", "") for t in self.system.get("import_templates", []) if t.get("name", "")]
+        self.order_review_template_combo["values"] = names
+        current = self.order_review_template.get()
+        if current not in names:
+            self.order_review_template.set(names[0] if names else "")
+
+    def current_order_review_template(self):
+        name = self.order_review_template.get().strip()
+        if not name:
+            self.refresh_order_review_template_choices()
+            name = self.order_review_template.get().strip()
+        return get_template(self.system, name)
+
+    def import_order_review_excel(self):
+        files = filedialog.askopenfilenames(title="选择1688订单Excel", filetypes=[("Excel文件", "*.xlsx *.xls")])
+        if not files:
+            return
+        self.order_review_files = list(files)
+        self.load_order_review_files()
+
+    def reload_order_review(self):
+        if not self.order_review_files:
+            messagebox.showwarning("提示", "请先导入订单Excel")
+            return
+        self.load_order_review_files()
+
+    def load_order_review_files(self):
+        try:
+            template = self.current_order_review_template()
+            rule_engine = RuleEngine(self.system.get("category_rules", []))
+            groups = {}
+            for file_path in self.order_review_files:
+                df = read_by_template(file_path, template)
+                for _, row in df.iterrows():
+                    short_name = str(row.get("商品简称", "") or "").strip()
+                    title = str(row.get("货品标题", "") or "").strip()
+                    remark = str(row.get("备注", "") or "").strip()
+                    raw_spec = extract_raw_spec(title)
+                    if raw_spec == "未知":
+                        raw_spec = ""
+                    size = extract_size(title)
+                    category = rule_engine.detect_category(short_name, title, raw_spec, remark)
+                    clean_spec = rule_engine.clean_spec(raw_spec, category) if category != "未分类" else normalize_text(raw_spec)
+                    key = "|".join([
+                        normalize_text(short_name),
+                        normalize_text(raw_spec),
+                        normalize_text(size),
+                        normalize_text(remark),
+                    ])
+                    if not key.strip("|"):
+                        continue
+                    item = groups.setdefault(key, {
+                        "key": key,
+                        "short_name": short_name,
+                        "title": title,
+                        "raw_spec": raw_spec,
+                        "clean_spec": clean_spec,
+                        "size": size,
+                        "remark": remark,
+                        "category": category,
+                        "quantity": 0,
+                        "image_status": "-",
+                    })
+                    item["quantity"] += normalize_qty(row.get("数量", 1))
+
+            used_categories = sorted({normalize_text(v.get("category", "")) for v in groups.values() if normalize_text(v.get("category", "")) and v.get("category") != "未分类"})
+            image_map = load_image_map_for_categories(self.system, used_categories)
+            matcher = ImageMatcher(image_map)
+            for item in groups.values():
+                category = item.get("category", "")
+                if not category or category == "未分类":
+                    item["image_status"] = "-"
+                    continue
+                found = matcher.find(
+                    category,
+                    item.get("clean_spec", "") or item.get("raw_spec", ""),
+                    item.get("remark", ""),
+                    item.get("title", ""),
+                    item.get("short_name", "")
+                )
+                item["image_status"] = "已匹配" if found else "无图片"
+
+            self.order_review_rows = groups
+            self.refresh_order_review()
+            pending = sum(1 for v in groups.values() if v.get("category") == "未分类")
+            messagebox.showinfo("读取完成", f"读取到 {len(groups)} 条订单规格；待编辑 {pending} 条。")
+        except Exception as e:
+            messagebox.showerror("读取失败", str(e))
+
+    def order_review_display_rows(self):
+        keyword = normalize_text(self.order_review_search.get())
+        rows = []
+        for row in self.order_review_rows.values():
+            status = "待编辑" if row.get("category") == "未分类" else "已识别"
+            if not self.order_review_show_known.get() and status == "已识别":
+                continue
+            haystack = normalize_text(" ".join([
+                row.get("short_name", ""),
+                row.get("category", ""),
+                row.get("raw_spec", ""),
+                row.get("remark", ""),
+                row.get("title", ""),
+            ]))
+            if keyword and keyword not in haystack:
+                continue
+            item = dict(row)
+            item["status"] = status
+            rows.append(item)
+        order = {"待编辑": 0, "已识别": 1}
+        return sorted(rows, key=lambda x: (order.get(x.get("status"), 9), x.get("short_name", ""), x.get("raw_spec", ""), x.get("size", "")))
+
+    def refresh_order_review(self):
+        if not hasattr(self, "order_review_tree"):
+            return
+        for item in self.order_review_tree.get_children():
+            self.order_review_tree.delete(item)
+        rows = self.order_review_display_rows()
+        for row in rows:
+            self.order_review_tree.insert(
+                "",
+                "end",
+                iid=row.get("key"),
+                values=(
+                    row.get("status", ""),
+                    row.get("short_name", ""),
+                    row.get("category", ""),
+                    row.get("raw_spec", ""),
+                    row.get("size", ""),
+                    row.get("quantity", ""),
+                    row.get("remark", ""),
+                    row.get("image_status", ""),
+                )
+            )
+        total = len(self.order_review_rows)
+        pending = sum(1 for row in self.order_review_rows.values() if row.get("category") == "未分类")
+        selected = len(self.order_review_tree.selection())
+        self.order_review_count_label.config(text=f"显示：{len(rows)} / 总数：{total} / 待编辑：{pending} / 已选：{selected}")
+
+    def current_order_review_row(self):
+        if not hasattr(self, "order_review_tree"):
+            return {}
+        selected = list(self.order_review_tree.selection())
+        key = selected[0] if selected else self.order_review_tree.focus()
+        return dict(self.order_review_rows.get(key, {})) if key else {}
+
+    def load_order_review_selection(self, event=None):
+        row = self.current_order_review_row()
+        if not row:
+            return
+        category = "" if row.get("category") == "未分类" else row.get("category", "")
+        self.order_review_category.set(category)
+        self.order_review_keyword.set(row.get("short_name", ""))
+        self.order_review_field.set("商品简称")
+        selected = len(self.order_review_tree.selection()) if hasattr(self, "order_review_tree") else 0
+        total = len(self.order_review_rows)
+        pending = sum(1 for item in self.order_review_rows.values() if item.get("category") == "未分类")
+        self.order_review_count_label.config(text=f"显示：{len(self.order_review_tree.get_children())} / 总数：{total} / 待编辑：{pending} / 已选：{selected}")
+
+    def use_order_review_short_keyword(self):
+        row = self.current_order_review_row()
+        if row:
+            self.order_review_keyword.set(row.get("short_name", ""))
+            self.order_review_field.set("商品简称")
+
+    def use_order_review_spec_keyword(self):
+        row = self.current_order_review_row()
+        if row:
+            self.order_review_keyword.set(row.get("raw_spec", ""))
+            self.order_review_field.set("销售规格")
+
+    def order_review_keyword_for_row(self, row, field, override="", single=False):
+        if single and override:
+            return normalize_text(override)
+        if field == "销售规格":
+            return normalize_text(row.get("raw_spec", ""))
+        if field == "备注":
+            return normalize_text(row.get("remark", ""))
+        if field == "货品标题":
+            return normalize_text(row.get("title", ""))
+        if field == "全部" and override:
+            return normalize_text(override)
+        return normalize_text(row.get("short_name", ""))
+
+    def upsert_category_rule(self, category, keyword, field, remove_words=""):
+        category = normalize_text(category)
+        keyword = normalize_text(keyword)
+        field = field or "商品简称"
+        if not category or not keyword:
+            return False
+        rule = {
+            "category": category,
+            "keyword": keyword,
+            "field": field,
+            "remove_words": str(remove_words or "").strip(),
+        }
+        arr = self.system.setdefault("category_rules", [])
+        for i, old in enumerate(arr):
+            if (
+                normalize_text(old.get("category", "")) == category
+                and normalize_text(old.get("keyword", "")) == keyword
+                and (old.get("field", "全部") or "全部") == field
+            ):
+                arr[i] = rule
+                return True
+        arr.append(rule)
+        return True
+
+    def save_selected_order_review_rules(self):
+        selected = list(self.order_review_tree.selection()) if hasattr(self, "order_review_tree") else []
+        if not selected:
+            messagebox.showwarning("提示", "请先选择订单行")
+            return
+        category = self.order_review_category.get().strip()
+        field = self.order_review_field.get() or "商品简称"
+        override = self.order_review_keyword.get().strip()
+        remove_words = self.order_review_remove.get().strip()
+        single = len(selected) == 1
+        count = 0
+        skipped = 0
+        for key in selected:
+            row = self.order_review_rows.get(key)
+            if not row:
+                skipped += 1
+                continue
+            save_category = category or ("" if row.get("category") == "未分类" else row.get("category", ""))
+            keyword = self.order_review_keyword_for_row(row, field, override, single=single)
+            if self.upsert_category_rule(save_category, keyword, field, remove_words):
+                row["category"] = normalize_text(save_category)
+                count += 1
+            else:
+                skipped += 1
+        if count:
+            self.save_all()
+            self.refresh_all()
+            messagebox.showinfo("成功", f"已保存 {count} 条分类规则，跳过 {skipped} 条。")
+        else:
+            messagebox.showwarning("提示", "没有可保存的规则，请填写分类和关键词。")
+
+    def save_all_ready_order_review_rules(self):
+        if not self.order_review_rows:
+            messagebox.showwarning("提示", "请先导入订单Excel")
+            return
+        category = self.order_review_category.get().strip()
+        field = self.order_review_field.get() or "商品简称"
+        remove_words = self.order_review_remove.get().strip()
+        count = 0
+        skipped = 0
+        for row in self.order_review_rows.values():
+            save_category = category or ("" if row.get("category") == "未分类" else row.get("category", ""))
+            keyword = self.order_review_keyword_for_row(row, field)
+            if self.upsert_category_rule(save_category, keyword, field, remove_words):
+                row["category"] = normalize_text(save_category)
+                count += 1
+            else:
+                skipped += 1
+        if count:
+            self.save_all()
+            self.refresh_all()
+        messagebox.showinfo("完成", f"已保存 {count} 条规则，跳过 {skipped} 条。")
 
     def refresh_templates(self):
         if not hasattr(self, "template_tree"):

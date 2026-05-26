@@ -75,7 +75,7 @@ from order_secure_common import (
 
 app = FastAPI(title="订单整理系统 Web服务")
 
-WEB_VERSION = "V7.5.1-LiteData-20260525"
+WEB_VERSION = "V7.6.1"
 ALLOWED_OUTPUT_MODES = {"合并一个Sheet", "按档口分Sheet", "按档口分文档"}
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
