@@ -1,39 +1,154 @@
-# Changelog
+# CHANGELOG
 
-## V7.6.1
+## V7.8.8_20260602
 
-- Released the order editor workflow as the formal V7.6.1 project.
-- Kept the lightweight data model and original category/stall/image matching workflow.
-- Added the Order Recognition tab for importing 1688 order Excel files, reviewing detected category/spec/image status, editing category and keyword fields, and saving selected rows as category rules.
-- Added batch rule creation from imported orders, including keyword source choices such as product short name or sales spec.
+### 修复
 
-## V7.5.1-OrderEditor-20260526
+- 监控面单远程汇总不再按任务/文档 key 折叠记录，停止监听后每条上传记录都会进入原始表和识别表。
+- 业务机监控上传、原始 Excel、识别 Excel 和本机 `面单信息` 导出均保留 `任务ID / 文档ID / 任务时间 / 采集端ID / 来源机器 / 来源序号`，方便回查源任务。
 
-- Kept the V7.5.1 lightweight data model and original category/stall/image matching workflow.
-- Added an Order Recognition tab for importing 1688 order Excel files, reviewing detected category/spec/image status, editing category and keyword fields, and saving selected rows as category rules.
-- Added batch rule creation from imported orders, including keyword source choices such as product short name or sales spec.
+## V7.8.7_20260602
 
-## V7.5.1-LiteData-20260525
+### 新增
 
-- Reworked startup loading window into a determinate progress page with file size, decrypt/parse, and image-shard scan stages.
-- Changed `system_data.enc` to a lightweight core-data file; image relations are no longer written into the encrypted main data file.
-- Added category-sharded image storage under `data/image_categories/*.json` and hashed image files under `data/images/`.
-- Updated backend image add/import/delete flows to operate on category shards instead of an in-memory global `image_map`.
-- Web status now reports image shard counts and storage size.
-- V7.5.1 starts from a clean data line and does not require old-version data compatibility.
+- 新增 `sku_image_binder.py`：支持生成 SKU 图片绑定模板、从 Excel/CSV 批量导入图片关系、从订单/面单识别文件生成缺图 SKU 清单；只处理用户提供的导出表、图片链接和本地图片目录，不做平台登录绕过。
+- 管理端 `图片关系` 页面新增批量入口：生成模板、预览批量导入、正式批量导入和生成缺图清单。
 
-## V7.4.8-RemarkMatch-20260525
+## V7.8.6_20260601
 
-- Added optional order remark field in import templates.
-- Category detection can now match rules against remarks.
-- Image matching now uses category, normalized spec, remarks, and source title text.
-- Image matching supports continuous normalized text containment, so partially contained spec names can still match within the same category.
-- Desktop one-click sorter now reuses the shared `order_core.py` generation logic.
-- Web version and console version updated to `V7.4.8-RemarkMatch-20260525`.
+### 调整
 
-## V7.4.7 Rectified Baseline
+- 面单标题规则改为可匹配完整打印标题，规格仍只输出商品后段，支持 ACG 这类长标题面单规则透明配置。
+- 面单解析保留 `低帮/高帮` 等真实规格词，不再把这些词当作隐藏噪声清洗掉。
+- 新增集中版本信息模块 `app_info.py`，Web、Qt 管理端、客户端和构建脚本统一读取同一版本常量。
+- Qt 构建产物改到版本目录 `build/` 下，源码目录不再继续堆积 `dist_qt_*`。
+- 旧业务机采集客户端源码移到 `collector_client_legacy/`，与当前订单系统主源码分开；发布包仍不附带采集客户端。
+- 拆分 `waybill_monitor.py`：服务端文件输出移到 `waybill_files.py`，业务机打印组件读取移到 `waybill_collector_reader.py`，旧文件只保留兼容转发。
+- 主系统 Qt 打包不再强制带入旧 `waybill_monitor.py` 和业务机本地打印组件读取模块。
+- 面单标题模式支持 `尺码(偏大一码,建议拍小) 1件`，并优先于逗号模式解析；新增匡威一星标题规则，规格去除尾部货号。
+- 面单解析页新增 `补识别空白`，可对已打开的识别结果表按当前规则补齐空白商品简称；识别结果表重新识别时优先读取 `原始打印信息`。
+- 最终订单整理文档不再输出内部识别用的 `鞋款` 列，按 `鞋款分类 + 规格` 合并输出。
+- 面单解析页保存识别结果时，会从已填写的 `商品简称` 自动学习店铺关键词/规格关键词规则，后续长期生效。
+- 面单导入与传统导入分线处理：传统导入继续走鞋款分类规则，面单导入直接把解析出的 `商品简称` 作为后续档口和图片关系使用的鞋款。
+- 鞋款档口与图片关系会合并读取面单解析规则里保存过的鞋款，旧图片分类如 `acg/vapor/赤足5.0` 可被 `ACG/VAP/5.0` 等面单鞋款复用。
+- 订单整理输出不再写图片识别状态；匹配到图片时直接显示图片，未匹配到时图片单元格保持空白。
+- 面单解析表格把原 `备注` 列替换为 `图片识别`，用于在解析阶段提前查看鞋款/规格是否已绑定图片。
+- 面单解析结果表支持点击表头排序，并新增 `图片识别` 状态筛选与关键词筛选。
+- 导入模板列表移除 `监控面单-原文模式` 和 `旧版-SV列模式`，面单原文改由面单解析页直接处理。
 
-- Improved Web UI.
-- Added download zip for per-stall document output.
-- Added runtime config cache to avoid repeatedly rewriting large encrypted data files.
-- Added safer download path checks.
+## V7.8.5_20260601
+
+### 调整
+
+- 面单解析规则取消隐藏内置默认值；未配置规则时不自动识别商品简称。
+- 清空当前系统旧的隐藏面单解析规则，避免未配置时仍识别出 `4.0/5.0/昂跑`。
+- 鞋款分类规则字段 `商品简称`、`规格` 改为只匹配对应五字段，不再回退匹配原始打印信息。
+- 如确实需要用原文匹配，鞋款分类规则可选择 `原始打印信息` 字段。
+
+## V7.8.4_20260601
+
+### 调整
+
+- 面单解析页新增 `保存修改`，表格手动修正后可直接保存为识别结果 Excel。
+- 打开已导出的识别结果 Excel 时直接加载表格，后续保存会覆盖该识别结果文件。
+- 发布包不再附带未更新的业务机监控打印机服务。
+
+## V7.8.3_20260601
+
+### 新增
+
+- 管理端新增 `面单解析` 页面，可直接打开采集到的原始 Excel。
+- 原始 Excel 识别后进入可编辑表格，支持手动修正商品简称、规格、尺码、数量和备注。
+- 面单解析规则改为系统数据内可编辑，支持规格关键词、店铺关键词、标题关键词三类规则。
+- Web 监听结束生成识别文档、原文模板导入整理时都读取同一套面单解析规则。
+
+## V7.8.2_20260601
+
+### 新增
+
+- Web 监听结束后同时提供原始文档和识别文档下载。
+- 自动把识别文档加入待生成文件，并切换到 `监控面单-识别结果模式`。
+- 识别文档保留 `店铺名 / 店铺关键词 / 面单模式 / 原始打印信息 / 解析状态`，方便后续人工校正规则。
+
+### 调整
+
+- 系统版本更新为 `V7.8.2`。
+- Qt 和业务机服务构建目录默认改为 `v7_8_2_YYYYMMDD_HHMMSS`。
+
+## V7.8.1-PrinterMonitor-20260531
+
+### 2026-06-01 职责边界清理
+
+- 采集工具边界收窄为只采集、回传 `打印信息` 原文。
+- 服务端监听批次产物改为 `监控面单原文_*.xlsx`，不再命名为导入表。
+- 新增 `waybill_raw_contract.py`，集中维护面单原文模板名、原文字段和内部解析字段。
+- 新增 `waybill_raw_pipeline.py`，把“打印信息原文 -> 五要素候选”的解析入口放回订单系统侧。
+- 默认系统模板改为 `监控面单-原文模式`，旧 `监控面单-表头模式` 仅作为兼容别名自动迁移。
+- Web 页面文案改为“采集原文/加入待处理”，去掉“采集端已识别五要素”的提示。
+- 面单原文解析新增标签成对识别：`颜色分类/规格` + `鞋码/尺码` 优先生成商品行。
+- 解析规则先内置昂跑关键词：`C6`、`怪兽`、`超级怪兽`、`Cloudtilt` 等归为 `昂跑`，后续可迁移为用户自定义配置。
+- 解析结果新增辅助字段 `店铺名 / 店铺关键词`，`秒+数字`、`范+数字` 只作为辅助匹配，不再混入五元素鞋款。
+- 鞋款判断顺序调整为先看规格关键词，规格无法区分时再使用去掉店铺名后的商品提示。
+- 店铺关键词不再自动写入 `商品简称`；例如 `AC`、`175` 需要后续用户确认映射后才作为最终鞋款。
+- 新增无店铺码的标题模式解析，支持 `【长标题】5.0二代白黑红 42 1 件` 这类打印信息。
+- 面单解析结构调整为先识别 `店铺码模式 / 标题模式`，再分别套用规格关键词和店铺关键词规则。
+- 内置规则表拆为 `spec_keyword_rules / shop_keyword_rules / title_shoe_rules`，方便后续迁移到用户自定义配置。
+- 监听结束后同时生成 `监控面单原文_*.xlsx` 和 `监控面单识别_*.xlsx`。
+- Web 页面提供原始文档、识别文档两个下载入口，并自动把识别文档加入待生成。
+- 新增导入模板 `监控面单-识别结果模式`，识别文档会按该模板自动进入整理流程。
+
+### 新增
+
+- 基于 `V7.8.0_五要素模块实验版_20260531` 新建 `V7.8.1_监听打印机版_20260531`。
+- 接回 `waybill_monitor.py`，用于读取打印组件数据库、生成打印信息原文 Excel。
+- 接回独立业务机监听服务：
+  - `business_waybill_service.py`
+  - `business_waybill_service.json`
+  - `build_waybill_service.py`
+  - 启动、安装自启、卸载自启、查看日志脚本
+- Web 后端新增 `/api/waybill/*` 批次接口：
+  - `GET /api/waybill/status`
+  - `POST /api/waybill/start`
+  - `POST /api/waybill/stop`
+  - `POST /api/waybill/agent/poll`
+  - `POST /api/waybill/agent/upload`
+- Web 生成页新增 `监听打印机面单` 区块，可开始监听、结束监听并加入待处理。
+
+### 调整
+
+- Web 生成接口恢复 `server_files`，可直接读取服务端刚生成的原文采集文件。
+- 新增系统模板 `监控面单-原文模式`，默认读取 `打印信息` 原文。
+- 面单监控工具只负责采集原文，五要素识别由订单系统解析管线负责。
+- 旧数据加载时会把 `监控面单-表头模式` 兼容迁移为 `监控面单-原文模式`。
+- 监听区改为上下布局，下载链接长文件名不再挤压左侧状态文字。
+- `waybill_monitor.py` 只写出 `打印信息`，不再保留采集端五字段或旧面单文本猜测逻辑。
+- Qt 编译输出目录改为 `dist_qt_v7_8_1_YYYYMMDD_HHMMSS`。
+
+## V7.8.0-Dev-20260531
+
+### 新增
+
+- 新建 `V7.8.0_五要素模块实验版_20260531`，作为新架构实验线。
+- 新增 `five_field_normalizer.py`，独立承接五要素识别模块。
+- 新增 `docs/V7.8.0_五要素模块方案.md`，记录主流程和模块边界。
+
+### 调整
+
+- V7.7.1 现在作为旧版本修复线保留，不再承载新架构大改。
+- `order_core.read_by_template()` 先把模板导入结果归一为 `鞋款 / 规格 / 尺码 / 数量 / 备注`。
+- `order_core.build_result()` 优先消费五要素字段，再进入鞋款分类、鞋款档口和图片关系。
+- 输出整理文档中的 `商品简称` 列调整为 `鞋款`。
+- `app.py` 清理为纯 Web/API 层，删除旧版重复生成逻辑。
+- 管理端导入模板外显文案从 `简称字段` 调整为 `鞋款字段`。
+- 编译目录改为 `dist_qt_v7_8_0_YYYYMMDD`。
+
+### 保留兼容
+
+- 内部仍镜像 `商品简称 / 货品标题`，用于兼容旧档口、图片和规则逻辑。
+- 数据文件仍暂时保留 `category_rules`、`stall_map` 兼容键。
+
+### 删除
+
+- 删除 V7.8.0 新目录里复制残留的旧文档：
+  - `docs/V7.7.1_统一识别模板方案.md`
+  - `V7.6.2_基线调试日志.md`

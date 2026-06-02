@@ -1,119 +1,89 @@
-﻿def normalize_qty(value):
-    try:
-        if value is None or str(value).strip() == "":
-            return 1
-        return int(float(value))
-    except Exception:
-        return 1
-
-
-def size_sort_key(size):
-    s = str(size).strip()
-    try:
-        return (0, float(s))
-    except Exception:
-        return (1, s)
-
-
-def merge_sizes(values):
-    """
-    旧兼容函数：仅合并尺码列表。
-    """
-    vals = [str(v).strip() for v in values if str(v).strip()]
-    unique = []
-    for v in vals:
-        if v not in unique:
-            unique.append(v)
-    return " ".join(sorted(unique, key=size_sort_key))
-
-
-def merge_size_quantity(group):
-    """
-    按商品数量展开尺码。
-    例如：41码，数量3，输出为：41 41 41。
-    """
-    expanded = []
-
-    for _, row in group.iterrows():
-        size = str(row.get("尺码", "")).strip()
-        if not size:
-            continue
-
-        qty = normalize_qty(row.get("数量", 1))
-        for _ in range(max(qty, 0)):
-            expanded.append(size)
-
-    return " ".join(sorted(expanded, key=size_sort_key))
-
-
 import os
-import re
-import uuid
-import secrets
-import inspect
-import importlib
+import json
+import time
 import traceback
+import uuid
 import zipfile
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
-import pandas as pd
-from PIL import Image as PILImage
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from openpyxl import load_workbook
-from openpyxl.drawing.image import Image as XLImage
-from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+from fastapi import FastAPI, File, Form, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
+from app_info import APP_VERSION
 from order_core import generate_order_file
 from order_secure_common import (
-    load_data, save_data, get_output_dir, get_temp_dir, get_data_dir, normalize_text,
-    get_data_file, make_image_key, base64_to_image_file, safe_filename, col_letter_to_index, ImageMatcher, load_image_map_for_categories,
+    WAYBILL_PROCESSED_TEMPLATE_NAME,
+    WAYBILL_TEMPLATE_NAME,
+    get_data_dir,
+    get_data_file,
+    get_output_dir,
     image_storage_summary,
+    load_data,
+    load_templates_fast,
 )
+import waybill_files
+from waybill_raw_pipeline import parse_raw_waybill_records, write_processed_waybill_xlsx
+
 
 app = FastAPI(title="订单整理系统 Web服务")
 
-WEB_VERSION = "V7.6.1"
+WEB_VERSION = APP_VERSION
 ALLOWED_OUTPUT_MODES = {"合并一个Sheet", "按档口分Sheet", "按档口分文档"}
+WAYBILL_REMOTE_STATE = {
+    "status": "idle",
+    "batch_id": "",
+    "started_at": "",
+    "stopped_at": "",
+    "last_raw_file": "",
+    "last_raw_count": 0,
+    "last_processed_file": "",
+    "last_processed_count": 0,
+    "collectors": {},
+    "uploads": {},
+}
+WAYBILL_COLLECTOR_ONLINE_SECONDS = 20
+WAYBILL_STOP_WAIT_SECONDS = 8
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+UPLOAD_DIR = os.path.join(get_output_dir(), "_web_uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 DATA_CACHE = {"signature": None, "data": None}
 
+
 def debug_environment():
-    info = {"web_version": WEB_VERSION, "app_file": __file__, "base_dir": BASE_DIR}
+    info = {
+        "web_version": WEB_VERSION,
+        "app_file": __file__,
+        "base_dir": BASE_DIR,
+        "data_dir": get_data_dir(),
+        "data_file": get_data_file(),
+    }
     try:
         import order_core
+
         info["order_core_file"] = getattr(order_core, "__file__", "")
-        info["order_core_has_ImageMatcher_name"] = "ImageMatcher" in dir(order_core)
         info["order_core_has_generate_order_file"] = hasattr(order_core, "generate_order_file")
-        info["order_core_has_merge_size_quantity"] = hasattr(order_core, "merge_size_quantity")
+        info["order_core_has_five_field_module"] = hasattr(order_core, "SHOE_FIELD")
     except Exception:
         info["order_core_import_error"] = traceback.format_exc()
+
+    try:
+        import five_field_normalizer
+
+        info["five_field_normalizer_file"] = getattr(five_field_normalizer, "__file__", "")
+        info["five_fields"] = getattr(five_field_normalizer, "FIVE_FIELDS", [])
+    except Exception:
+        info["five_field_normalizer_error"] = traceback.format_exc()
+
     try:
         import order_secure_common
+
         info["order_secure_common_file"] = getattr(order_secure_common, "__file__", "")
-        info["secure_common_has_ImageMatcher"] = hasattr(order_secure_common, "ImageMatcher")
         info["secure_common_has_get_data_dir"] = hasattr(order_secure_common, "get_data_dir")
     except Exception:
         info["order_secure_common_import_error"] = traceback.format_exc()
-    try:
-        from order_secure_common import ImageMatcher as _ImageMatcher
-        info["direct_import_ImageMatcher"] = True
-    except Exception:
-        info["direct_import_ImageMatcher"] = False
-        info["direct_import_ImageMatcher_error"] = traceback.format_exc()
-    try:
-        from order_core import generate_order_file as _generate_order_file
-        info["direct_import_generate_order_file"] = True
-    except Exception:
-        info["direct_import_generate_order_file"] = False
-        info["direct_import_generate_order_file_error"] = traceback.format_exc()
     return info
-
 
 
 def load_html(name):
@@ -138,6 +108,231 @@ def load_runtime_data():
     DATA_CACHE["signature"] = get_data_signature()
     DATA_CACHE["data"] = data
     return data
+
+
+def current_time_text():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def parse_time_text(value):
+    text = str(value or "").strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(text[:19], fmt)
+        except Exception:
+            continue
+    return None
+
+
+def collector_is_online(collector, max_age_seconds=WAYBILL_COLLECTOR_ONLINE_SECONDS):
+    seen = parse_time_text(collector.get("last_seen"))
+    if not seen:
+        return False
+    return (datetime.now() - seen).total_seconds() <= max_age_seconds
+
+
+def public_waybill_collectors():
+    uploads = WAYBILL_REMOTE_STATE.get("uploads", {})
+    collector_items = WAYBILL_REMOTE_STATE.get("collectors", {})
+    client_ids = sorted(set(collector_items.keys()) | set(uploads.keys()))
+    rows = []
+    for client_id in client_ids:
+        item = collector_items.get(client_id, {})
+        upload = uploads.get(client_id, {})
+        components = item.get("components") if isinstance(item.get("components"), list) else []
+        rows.append(
+            {
+                "client_id": client_id,
+                "machine_name": item.get("machine_name") or upload.get("machine_name") or "",
+                "machine_label": item.get("machine_label") or upload.get("machine_label") or client_id,
+                "hostname": item.get("hostname") or upload.get("hostname") or "",
+                "username": item.get("username") or upload.get("username") or "",
+                "platform": item.get("platform") or "",
+                "last_seen": item.get("last_seen") or "",
+                "online": collector_is_online(item),
+                "components": components,
+                "component_count": len(components),
+                "available_components": len([row for row in components if row.get("exists")]),
+                "uploaded": bool(upload),
+                "uploaded_records": len(upload.get("records", [])) if upload else 0,
+                "uploaded_at": upload.get("uploaded_at") or "",
+                "records_found": upload.get("records_found", 0) if upload else 0,
+            }
+        )
+    return rows
+
+
+def online_waybill_collector_ids():
+    return [
+        row.get("client_id")
+        for row in public_waybill_collectors()
+        if row.get("client_id") and row.get("online")
+    ]
+
+
+def dedupe_waybill_records(records):
+    merged = []
+    keyed_positions = {}
+    for row in records:
+        key = waybill_files.record_key(row)
+        if key:
+            previous = keyed_positions.get(key)
+            if previous is not None:
+                merged[previous] = row
+                continue
+            keyed_positions[key] = len(merged)
+        merged.append(row)
+    return merged
+
+
+def uploaded_waybill_records():
+    records = []
+    uploads = WAYBILL_REMOTE_STATE.get("uploads", {})
+    for client_id, upload in uploads.items():
+        for row in upload.get("records", []):
+            record = dict(row)
+            record.setdefault("source_client_id", client_id)
+            record.setdefault("machine_name", upload.get("machine_name", ""))
+            record.setdefault("machine_label", upload.get("machine_label", ""))
+            records.append(record)
+    return records
+
+
+def finalize_remote_waybill_batch():
+    records = uploaded_waybill_records()
+    batch_tag = waybill_files.safe_batch_tag(WAYBILL_REMOTE_STATE.get("batch_id") or WAYBILL_REMOTE_STATE.get("started_at"))
+    if records:
+        export_result = waybill_files.export_records(records, merge_existing=False, batch_tag=batch_tag)
+        raw_path = waybill_files.unique_path(waybill_files.raw_waybill_path(batch_tag=batch_tag))
+        raw_file = str(waybill_files.write_raw_waybill_xlsx(records, raw_path))
+        data = load_data(auto_save_on_read=False)
+        system = data.get("systems", {}).get(data.get("active_system", "default"), {}) if isinstance(data, dict) else {}
+        processed_rows = parse_raw_waybill_records(records, system.get("waybill_parse_rules", {}))
+        processed_path = waybill_files.unique_path(waybill_files.processed_waybill_path(batch_tag=batch_tag))
+        processed_file = str(write_processed_waybill_xlsx(processed_rows, processed_path))
+    else:
+        export_result = {"total": 0, "added": 0, "xlsx": "", "jsonl": ""}
+        raw_file = ""
+        processed_rows = []
+        processed_file = ""
+
+    WAYBILL_REMOTE_STATE["last_raw_file"] = raw_file
+    WAYBILL_REMOTE_STATE["last_raw_count"] = len(records)
+    WAYBILL_REMOTE_STATE["last_processed_file"] = processed_file
+    WAYBILL_REMOTE_STATE["last_processed_count"] = len(processed_rows)
+    return records, raw_file, processed_file, export_result
+
+
+def wait_for_waybill_uploads(expected_client_ids):
+    deadline = time.time() + WAYBILL_STOP_WAIT_SECONDS
+    expected = {item for item in expected_client_ids if item}
+    while time.time() < deadline:
+        uploads = WAYBILL_REMOTE_STATE.get("uploads", {})
+        if not expected or expected.issubset(set(uploads.keys())):
+            break
+        time.sleep(0.4)
+
+
+def latest_waybill_raw_file():
+    state_path = str(WAYBILL_REMOTE_STATE.get("last_raw_file") or "").strip()
+    if state_path and os.path.exists(state_path) and not os.path.isdir(state_path):
+        return state_path
+    if str(WAYBILL_REMOTE_STATE.get("status") or "") in {"running", "stopping"}:
+        return ""
+
+
+def latest_waybill_processed_file():
+    state_path = str(WAYBILL_REMOTE_STATE.get("last_processed_file") or "").strip()
+    if state_path and os.path.exists(state_path) and not os.path.isdir(state_path):
+        return state_path
+    if str(WAYBILL_REMOTE_STATE.get("status") or "") in {"running", "stopping"}:
+        return ""
+
+    try:
+        output_dir = waybill_files.get_waybill_output_dir()
+        candidates = sorted(output_dir.glob("监控面单识别_*.xlsx"), key=lambda item: item.stat().st_mtime, reverse=True)
+        return str(candidates[0]) if candidates else ""
+    except Exception:
+        return ""
+
+    try:
+        output_dir = waybill_files.get_waybill_output_dir()
+        candidates = sorted(output_dir.glob("监控面单原文_*.xlsx"), key=lambda item: item.stat().st_mtime, reverse=True)
+        return str(candidates[0]) if candidates else ""
+    except Exception:
+        return ""
+
+
+def waybill_raw_row_count(path):
+    if not path or not os.path.exists(path):
+        return 0
+    try:
+        from openpyxl import load_workbook
+
+        wb = load_workbook(path, read_only=True, data_only=True)
+        ws = wb.active
+        return max(0, (ws.max_row or 1) - 1)
+    except Exception:
+        return 0
+
+
+def waybill_status_payload():
+    collectors = public_waybill_collectors()
+    online_collectors = [item for item in collectors if item.get("online")]
+    records = uploaded_waybill_records()
+    status_text = str(WAYBILL_REMOTE_STATE.get("status") or "idle")
+    last_raw_file = latest_waybill_raw_file()
+    last_raw_count = WAYBILL_REMOTE_STATE.get("last_raw_count", 0) or waybill_raw_row_count(last_raw_file)
+    last_processed_file = latest_waybill_processed_file()
+    last_processed_count = WAYBILL_REMOTE_STATE.get("last_processed_count", 0) or waybill_raw_row_count(last_processed_file)
+    return {
+        "ok": True,
+        "web_version": WEB_VERSION,
+        "active": status_text in {"running", "stopping"},
+        "status": status_text,
+        "batch_id": WAYBILL_REMOTE_STATE.get("batch_id", ""),
+        "started_at": WAYBILL_REMOTE_STATE.get("started_at", ""),
+        "stopped_at": WAYBILL_REMOTE_STATE.get("stopped_at", ""),
+        "last_raw_file": last_raw_file,
+        "last_raw_filename": os.path.basename(last_raw_file) if last_raw_file else "",
+        "last_raw_count": last_raw_count,
+        "last_processed_file": last_processed_file,
+        "last_processed_filename": os.path.basename(last_processed_file) if last_processed_file else "",
+        "last_processed_count": last_processed_count,
+        "records": len(records),
+        "session_records": len(records) if status_text in {"running", "stopping"} else last_raw_count,
+        "collectors": collectors,
+        "online_collectors": len(online_collectors),
+        "collector_count": len(collectors),
+        "uploaded_collectors": len(WAYBILL_REMOTE_STATE.get("uploads", {})),
+        "template_name": WAYBILL_TEMPLATE_NAME,
+        "processed_template_name": WAYBILL_PROCESSED_TEMPLATE_NAME,
+    }
+
+
+def parse_server_files(raw_value):
+    if not raw_value:
+        return []
+    try:
+        values = json.loads(raw_value)
+    except Exception:
+        values = [raw_value]
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, list):
+        raise ValueError("server_files 格式无效")
+
+    result = []
+    for value in values:
+        path = os.path.abspath(str(value or "").strip())
+        if not path:
+            continue
+        if not is_path_under(path, get_output_dir()):
+            raise ValueError("只能使用输出目录内的服务器文件")
+        if not os.path.exists(path) or os.path.isdir(path):
+            raise ValueError(f"服务器文件不存在：{os.path.basename(path)}")
+        result.append(path)
+    return result
 
 
 def is_path_under(path, root):
@@ -171,7 +366,6 @@ def zip_output_folder(folder_path):
 def get_current_system():
     data = load_runtime_data()
 
-    # 新版多系统结构
     if isinstance(data, dict) and "systems" in data:
         system_id = data.get("active_system", "default")
         systems = data.get("systems", {})
@@ -182,20 +376,12 @@ def get_current_system():
         system = systems.get(system_id, {})
         return system, system_id
 
-    # 旧版单系统结构
     return data, "default"
-
-
-IMAGE_WIDTH_PX = 140
-IMAGE_HEIGHT_PX = 120
 
 
 @app.get("/", response_class=HTMLResponse)
 def index():
     return load_html("index.html")
-
-
-
 
 
 @app.get("/api/version")
@@ -207,10 +393,9 @@ def api_version():
 def api_self_check():
     info = debug_environment()
     info["ok"] = (
-        info.get("secure_common_has_ImageMatcher") is True
-        and info.get("direct_import_ImageMatcher") is True
-        and info.get("direct_import_generate_order_file") is True
-        and info.get("order_core_has_generate_order_file") is True
+        info.get("order_core_has_generate_order_file") is True
+        and info.get("order_core_has_five_field_module") is True
+        and bool(info.get("five_fields"))
     )
     return info
 
@@ -218,11 +403,27 @@ def api_self_check():
 @app.get("/api/debug/core-check")
 def api_debug_core_check():
     try:
-        from order_secure_common import ImageMatcher as _ImageMatcher
+        import five_field_normalizer
         from order_core import generate_order_file as _generate_order_file
-        return {"ok": True, "web_version": WEB_VERSION, "message": "核心模块导入正常", "debug": debug_environment()}
+
+        return {
+            "ok": True,
+            "web_version": WEB_VERSION,
+            "message": "五要素模块和订单核心模块导入正常",
+            "five_fields": getattr(five_field_normalizer, "FIVE_FIELDS", []),
+            "debug": debug_environment(),
+        }
     except Exception:
-        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": "核心模块导入失败", "traceback": traceback.format_exc(), "debug": debug_environment()}, status_code=500)
+        return JSONResponse(
+            {
+                "ok": False,
+                "web_version": WEB_VERSION,
+                "error": "核心模块导入失败",
+                "traceback": traceback.format_exc(),
+                "debug": debug_environment(),
+            },
+            status_code=500,
+        )
 
 
 @app.get("/api/status")
@@ -244,360 +445,177 @@ def status():
     }
 
 
-
 @app.get("/api/templates")
 def api_templates():
-    system, system_id = get_current_system()
-    templates = system.get("import_templates", [])
+    system, _ = get_current_system()
+    templates = load_templates_fast() or system.get("import_templates", [])
     active_template = system.get("active_template", "")
 
     return {
         "ok": True,
+        "web_version": WEB_VERSION,
         "active_template": active_template,
         "templates": [
             {
                 "name": t.get("name", ""),
-                "mode": t.get("mode", "")
+                "mode": t.get("mode", ""),
             }
             for t in templates
             if t.get("name", "")
-        ]
+        ],
     }
 
 
-def split_items(value, sep):
-    if value is None:
-        return []
-    return [x.strip() for x in str(value).split(sep) if str(x).strip()]
+@app.get("/api/waybill/status")
+def api_waybill_status():
+    return waybill_status_payload()
 
 
-def split_spec_to_color_size(spec, split_char):
-    spec = str(spec).strip()
-    for sp in [split_char, "，", ",", " "]:
-        if sp and sp in spec:
-            parts = spec.rsplit(sp, 1)
-            if len(parts) == 2:
-                return parts[0].strip(), parts[1].strip()
-    return spec, "未知"
+@app.post("/api/waybill/start")
+def api_waybill_start():
+    batch_id = f"WB{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    WAYBILL_REMOTE_STATE["status"] = "running"
+    WAYBILL_REMOTE_STATE["batch_id"] = batch_id
+    WAYBILL_REMOTE_STATE["started_at"] = current_time_text()
+    WAYBILL_REMOTE_STATE["stopped_at"] = ""
+    WAYBILL_REMOTE_STATE["last_raw_file"] = ""
+    WAYBILL_REMOTE_STATE["last_raw_count"] = 0
+    WAYBILL_REMOTE_STATE["last_processed_file"] = ""
+    WAYBILL_REMOTE_STATE["last_processed_count"] = 0
+    WAYBILL_REMOTE_STATE["uploads"] = {}
+    return waybill_status_payload()
 
 
-def read_by_template(file_path, template):
-    df = pd.read_excel(file_path)
-    mode = template.get("mode", "表头")
-    item_sep = template.get("item_sep", ";") or ";"
-    spec_split = template.get("spec_split", "，") or "，"
-    rows = []
+@app.post("/api/waybill/stop")
+def api_waybill_stop():
+    if WAYBILL_REMOTE_STATE.get("status") not in {"running", "stopping"}:
+        return JSONResponse({"ok": False, "error": "打印机监听未启动"}, status_code=400)
 
-    if mode == "表头":
-        short_col = template.get("short_name", "")
-        spec_col = template.get("spec", "")
-        qty_col = template.get("qty", "")
+    expected_client_ids = online_waybill_collector_ids()
+    WAYBILL_REMOTE_STATE["status"] = "stopping"
+    WAYBILL_REMOTE_STATE["stopped_at"] = current_time_text()
+    wait_for_waybill_uploads(expected_client_ids)
+    records, raw_file, processed_file, export_result = finalize_remote_waybill_batch()
+    WAYBILL_REMOTE_STATE["status"] = "finished"
 
-        if not {short_col, spec_col, qty_col}.issubset(set(df.columns)):
-            raise ValueError(f"文件缺少模板指定表头：{os.path.basename(file_path)}")
-
-        temp = df[[short_col, spec_col, qty_col]].copy()
-        temp = temp.dropna(subset=[short_col, spec_col])
-
-        for _, row in temp.iterrows():
-            names = split_items(row[short_col], item_sep)
-            specs = split_items(row[spec_col], item_sep)
-            qtys = split_items(row[qty_col], item_sep)
-            max_len = max(len(names), len(specs), len(qtys), 1)
-
-            for i in range(max_len):
-                name = names[i] if i < len(names) else (names[-1] if names else "")
-                spec = specs[i] if i < len(specs) else (specs[-1] if specs else "")
-                qty = qtys[i] if i < len(qtys) else (qtys[-1] if qtys else "1")
-                color, size = split_spec_to_color_size(spec, spec_split)
-                title = f"{name} 颜色: {color} 尺码: {size}"
-                rows.append({
-                    "商品简称": name,
-                    "货品标题": title,
-                    "数量": qty,
-                    "来源文件": os.path.basename(file_path)
-                })
-    else:
-        title_idx = col_letter_to_index(template.get("title_col", "S"))
-        qty_idx = col_letter_to_index(template.get("qty_col", "V"))
-
-        if df.shape[1] <= max(title_idx, qty_idx):
-            raise ValueError(f"文件列数不足：{os.path.basename(file_path)}")
-
-        temp = df.iloc[:, [title_idx, qty_idx]].copy()
-        temp.columns = ["货品标题", "数量"]
-        temp = temp.dropna(subset=["货品标题"])
-
-        def guess_short_name(title):
-            m = re.search(r"^(.*?)\s*颜色[:：]", str(title))
-            return m.group(1).strip() if m else str(title).strip()
-
-        for _, row in temp.iterrows():
-            rows.append({
-                "商品简称": guess_short_name(row["货品标题"]),
-                "货品标题": row["货品标题"],
-                "数量": row["数量"],
-                "来源文件": os.path.basename(file_path)
-            })
-
-    out = pd.DataFrame(rows)
-    out["数量"] = pd.to_numeric(out["数量"], errors="coerce").fillna(1).astype(int)
-    return out
-
-
-def extract_size(title):
-    m = re.search(r"尺码[:：]\s*([0-9.]+)", str(title))
-    return m.group(1) if m else "未知"
-
-
-def extract_raw_spec(title):
-    m = re.search(r"颜色[:：]\s*(.*?)\s*尺码", str(title))
-    return normalize_text(m.group(1)) if m else "未知"
-
-
-def size_sort_key(size):
-    try:
-        return float(size)
-    except Exception:
-        return 999
-
-
-def merge_sizes(series):
-    sizes = [str(x).strip() for x in series if str(x).strip() and str(x).strip() != "未知"]
-    return " ".join(sorted(sizes, key=size_sort_key))
-
-
-def rule_score(rule, short_name, title, raw_spec):
-    kw = normalize_text(rule.get("keyword", ""))
-    if not kw:
-        return -1
-
-    field = rule.get("field", "全部")
-    targets = []
-
-    if field == "商品简称":
-        targets = [(normalize_text(short_name), 1000)]
-    elif field == "销售规格":
-        targets = [(normalize_text(raw_spec), 700)]
-    elif field == "货品标题":
-        targets = [(normalize_text(title), 500)]
-    else:
-        targets = [
-            (normalize_text(short_name), 1000),
-            (normalize_text(raw_spec), 700),
-            (normalize_text(title), 500)
-        ]
-
-    best = -1
-    for text, weight in targets:
-        if kw in text:
-            best = max(best, weight + len(kw))
-    return best
-
-
-def detect_category(short_name, title, raw_spec, rules):
-    category = "未分类"
-    best = -1
-    for r in rules:
-        score = rule_score(r, short_name, title, raw_spec)
-        if score > best:
-            category = r.get("category", "未分类")
-            best = score
-    return category
-
-
-def clean_spec(raw_spec, category, rules):
-    spec = normalize_text(raw_spec)
-    words = []
-    for r in rules:
-        if normalize_text(r.get("category", "")) == normalize_text(category):
-            remove_words = str(r.get("remove_words", "")).strip()
-            if remove_words:
-                for w in remove_words.replace("，", ",").split(","):
-                    w = normalize_text(w)
-                    if w and w not in words:
-                        words.append(w)
-    for w in words:
-        spec = spec.replace(w, "")
-    return spec if spec else raw_spec
-
-
-def get_stall(category, stall_map):
-    return stall_map.get(normalize_text(category), "未设置档口")
-
-
-def safe_sheet_name(name):
-    name = re.sub(r'[\\/:*?\[\]]', "_", str(name).strip())
-    return name[:31] if name else "未设置档口"
-
-
-def prepare_image(image_b64, category, spec):
-    temp_dir = get_temp_dir()
-    raw = os.path.join(temp_dir, f"{safe_filename(category)}_{safe_filename(spec)}_raw")
-    png = os.path.join(temp_dir, f"{safe_filename(category)}_{safe_filename(spec)}.png")
-    base64_to_image_file(image_b64, raw)
-    return prepare_image_file(raw, category, spec)
-
-
-def prepare_image_file(source_path, category, spec):
-    temp_dir = get_temp_dir()
-    png = os.path.join(temp_dir, f"{safe_filename(category)}_{safe_filename(spec)}.png")
-
-    img = PILImage.open(source_path)
-    if img.mode in ("RGBA", "LA"):
-        bg = PILImage.new("RGBA", img.size, (255,255,255,255))
-        bg.paste(img, mask=img.getchannel("A"))
-        img = bg.convert("RGB")
-    else:
-        img = img.convert("RGB")
-    img.thumbnail((IMAGE_WIDTH_PX, IMAGE_HEIGHT_PX), PILImage.LANCZOS)
-    canvas = PILImage.new("RGB", (IMAGE_WIDTH_PX, IMAGE_HEIGHT_PX), (255,255,255))
-    canvas.paste(img, ((IMAGE_WIDTH_PX-img.width)//2, (IMAGE_HEIGHT_PX-img.height)//2))
-    canvas.save(png)
-    return png
-
-
-def prepare_image_item(item, category, spec):
-    if not item:
-        return ""
-
-    image_file = item.get("image_file") or item.get("file") or ""
-    if image_file:
-        source = image_file
-        if not os.path.isabs(source):
-            source = os.path.join(get_data_dir(), image_file)
-        if os.path.exists(source):
-            return prepare_image_file(source, category, spec)
-
-    image_b64 = item.get("image_base64")
-    if image_b64:
-        return prepare_image(image_b64, category, spec)
-
-    return ""
-
-
-def style_and_images(output_file, image_map):
-    matcher = ImageMatcher(image_map)
-    wb = load_workbook(output_file)
-    for ws in wb.worksheets:
-        headers = {normalize_text(ws.cell(row=1, column=c).value): c for c in range(1, ws.max_column+1)}
-        cat_col = headers.get("分类", 1)
-        spec_col = headers.get("规格", 2)
-        img_col = headers.get("图片", 3)
-        img_letter = ws.cell(row=1, column=img_col).column_letter
-
-        header_fill = PatternFill("solid", fgColor="1F4E78")
-        header_font = Font(color="FFFFFF", bold=True)
-        thin = Side(style="thin", color="D9E2F3")
-        border = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-        for cell in ws[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = border
-
-        for c in range(1, ws.max_column+1):
-            ws.column_dimensions[ws.cell(row=1, column=c).column_letter].width = 18
-        ws.column_dimensions[img_letter].width = 20
-
-        for row in range(2, ws.max_row+1):
-            ws.row_dimensions[row].height = IMAGE_HEIGHT_PX * 0.75
-            for col in range(1, ws.max_column+1):
-                cell = ws.cell(row=row, column=col)
-                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-                cell.border = border
-
-            cat = normalize_text(ws.cell(row=row, column=cat_col).value)
-            spec = normalize_text(ws.cell(row=row, column=spec_col).value)
-            item = matcher.find(cat, spec)
-            if item:
-                try:
-                    path = prepare_image_item(item, cat, spec)
-                    if path:
-                        img = XLImage(path)
-                        img.width = IMAGE_WIDTH_PX
-                        img.height = IMAGE_HEIGHT_PX
-                        ws.add_image(img, f"{img_letter}{row}")
-                        ws.cell(row=row, column=img_col).value = ""
-                except Exception:
-                    ws.cell(row=row, column=img_col).value = ""
-    wb.save(output_file)
-
-
-def generate(files: List[str], output_mode: str, system: dict, template_name: str = ''):
-    rules = system.get("category_rules", [])
-    stall_map = system.get("stall_map", {})
-    templates = system.get("import_templates", [])
-    active_name = template_name or system.get("active_template", "")
-    template = next((t for t in templates if t.get("name") == active_name), templates[0] if templates else None)
-
-    if not template:
-        raise ValueError("后端未配置导入模板")
-    if not rules:
-        raise ValueError("后端未配置分类规则")
-
-    df = pd.concat([read_by_template(f, template) for f in files], ignore_index=True)
-    df["原始规格"] = df["货品标题"].apply(extract_raw_spec)
-    df["尺码"] = df["货品标题"].apply(extract_size)
-    df["分类"] = df.apply(lambda r: detect_category(r.get("商品简称", ""), r["货品标题"], r["原始规格"], rules), axis=1)
-    df["规格"] = df.apply(lambda r: clean_spec(r["原始规格"], r["分类"], rules), axis=1)
-    df["档口"] = df["分类"].apply(lambda c: get_stall(c, stall_map))
-
-    result = (
-        df.groupby(["档口", "分类", "规格"], dropna=False)
-        .apply(lambda g: pd.Series({
-            "尺码": merge_size_quantity(g),
-            "数量": sum(normalize_qty(v) for v in g["数量"])
-        }))
-        .reset_index()
-        .sort_values(by=["档口", "分类", "规格"])
+    payload = waybill_status_payload()
+    payload.update(
+        {
+            "records_found": len(records),
+            "session_records": len(records),
+            "raw_file": raw_file,
+            "raw_filename": os.path.basename(raw_file) if raw_file else "",
+            "processed_file": processed_file,
+            "processed_filename": os.path.basename(processed_file) if processed_file else "",
+            "processed_records": WAYBILL_REMOTE_STATE.get("last_processed_count", 0),
+            "processed_template_name": WAYBILL_PROCESSED_TEMPLATE_NAME,
+            "export_result": export_result,
+            "expected_collectors": expected_client_ids,
+            "uploaded_collectors": list(WAYBILL_REMOTE_STATE.get("uploads", {}).keys()),
+        }
     )
+    return payload
 
-    used_categories = sorted({normalize_text(c) for c in result["分类"].dropna().tolist() if normalize_text(c)})
-    image_map = load_image_map_for_categories(system, used_categories)
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = get_output_dir()
+@app.post("/api/waybill/agent/poll")
+def api_waybill_agent_poll(payload: dict):
+    client_id = str(payload.get("client_id") or "").strip()
+    if not client_id:
+        return JSONResponse({"ok": False, "error": "client_id_required"}, status_code=400)
 
-    if output_mode == "合并一个Sheet":
-        out = os.path.join(out_dir, f"订单整理文档_合并_{ts}.xlsx")
-        out_df = result[["档口","分类","规格","尺码","数量"]].copy()
-        out_df.insert(3, "图片", "")
-        with pd.ExcelWriter(out, engine="openpyxl") as writer:
-            out_df.to_excel(writer, sheet_name="全部订单", index=False)
-        style_and_images(out, image_map)
-        return out
+    collectors = WAYBILL_REMOTE_STATE.setdefault("collectors", {})
+    collectors[client_id] = {
+        "client_id": client_id,
+        "machine_name": str(payload.get("machine_name") or ""),
+        "machine_label": str(payload.get("machine_label") or payload.get("machine_name") or client_id),
+        "hostname": str(payload.get("hostname") or ""),
+        "username": str(payload.get("username") or ""),
+        "platform": str(payload.get("platform") or ""),
+        "active_batch_id": str(payload.get("active_batch_id") or ""),
+        "components": payload.get("components") if isinstance(payload.get("components"), list) else [],
+        "last_seen": current_time_text(),
+    }
 
-    if output_mode == "按档口分文档":
-        batch = os.path.join(out_dir, f"订单整理文档_按档口分文档_{ts}")
-        os.makedirs(batch, exist_ok=True)
-        for stall, stall_df in result.groupby("档口", dropna=False):
-            out = os.path.join(batch, f"{safe_sheet_name(stall)}_{ts}.xlsx")
-            out_df = stall_df[["分类","规格","尺码","数量"]].copy()
-            out_df.insert(2, "图片", "")
-            with pd.ExcelWriter(out, engine="openpyxl") as writer:
-                out_df.to_excel(writer, sheet_name=safe_sheet_name(stall), index=False)
-            style_and_images(out, image_map)
-        return batch
+    status_text = str(WAYBILL_REMOTE_STATE.get("status") or "idle")
+    batch_id = str(WAYBILL_REMOTE_STATE.get("batch_id") or "")
+    uploads = WAYBILL_REMOTE_STATE.get("uploads", {})
+    if status_text == "running" and batch_id:
+        command = "start"
+    elif status_text in {"stopping", "finished"} and batch_id and client_id not in uploads:
+        command = "stop"
+    else:
+        command = "idle"
+    system, _ = get_current_system()
 
-    out = os.path.join(out_dir, f"订单整理文档_分Sheet_{ts}.xlsx")
-    with pd.ExcelWriter(out, engine="openpyxl") as writer:
-        for stall, stall_df in result.groupby("档口", dropna=False):
-            out_df = stall_df[["分类","规格","尺码","数量"]].copy()
-            out_df.insert(2, "图片", "")
-            out_df.to_excel(writer, sheet_name=safe_sheet_name(stall), index=False)
-    style_and_images(out, image_map)
-    return out
+    return {
+        "ok": True,
+        "web_version": WEB_VERSION,
+        "command": command,
+        "batch_id": batch_id,
+        "status": status_text,
+        "recognition_mode": "server",
+        "server_rule_count": len(system.get("category_rules", []) if isinstance(system, dict) else []),
+        "poll_interval_seconds": 2,
+    }
+
+
+@app.post("/api/waybill/agent/upload")
+def api_waybill_agent_upload(payload: dict):
+    client_id = str(payload.get("client_id") or "").strip()
+    batch_id = str(payload.get("batch_id") or "").strip()
+    if not client_id or not batch_id:
+        return JSONResponse({"ok": False, "error": "client_id_and_batch_id_required"}, status_code=400)
+    if batch_id != str(WAYBILL_REMOTE_STATE.get("batch_id") or ""):
+        return JSONResponse({"ok": False, "error": "batch_id_not_current"}, status_code=409)
+
+    records_raw = payload.get("records", [])
+    if not isinstance(records_raw, list):
+        return JSONResponse({"ok": False, "error": "records_must_be_list"}, status_code=400)
+
+    machine_name = str(payload.get("machine_name") or "")
+    machine_label = str(payload.get("machine_label") or machine_name or client_id)
+    records = []
+    for index, row in enumerate(records_raw, 1):
+        if not isinstance(row, dict):
+            continue
+        record = dict(row)
+        record["source_client_id"] = client_id
+        record.setdefault("source_record_index", index)
+        record["machine_name"] = machine_name
+        record["machine_label"] = machine_label
+        records.append(record)
+
+    WAYBILL_REMOTE_STATE.setdefault("uploads", {})[client_id] = {
+        "client_id": client_id,
+        "machine_name": machine_name,
+        "machine_label": machine_label,
+        "hostname": str(payload.get("hostname") or ""),
+        "username": str(payload.get("username") or ""),
+        "uploaded_at": current_time_text(),
+        "records_found": int(payload.get("records_found") or len(records)),
+        "records": records,
+    }
+    if WAYBILL_REMOTE_STATE.get("status") in {"stopping", "finished"}:
+        finalize_remote_waybill_batch()
+    return {
+        "ok": True,
+        "web_version": WEB_VERSION,
+        "batch_id": batch_id,
+        "accepted": len(records),
+        "uploaded_collectors": list(WAYBILL_REMOTE_STATE.get("uploads", {}).keys()),
+    }
 
 
 @app.post("/api/generate")
 async def api_generate(
-    files: List[UploadFile] = File(...),
+    files: Optional[List[UploadFile]] = File(None),
     output_mode: str = Form("按档口分Sheet"),
-    template_name: str = Form("")
+    template_name: str = Form(""),
+    server_files: str = Form(""),
 ):
-    system, system_id = get_current_system()
+    system, _ = get_current_system()
+    system = dict(system or {})
+    system["import_templates"] = load_templates_fast() or system.get("import_templates", [])
 
     if not system:
         return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": "未配置整理系统", "debug": debug_environment()}, status_code=403)
@@ -609,15 +627,23 @@ async def api_generate(
         return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": "输出方式无效", "debug": debug_environment()}, status_code=400)
 
     saved = []
+    server_saved = []
     try:
-        for file in files:
+        server_saved = parse_server_files(server_files)
+        for file in files or []:
+            if not file or not file.filename:
+                continue
             suffix = os.path.splitext(file.filename)[1] or ".xlsx"
             path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex}{suffix}")
             with open(path, "wb") as f:
                 f.write(await file.read())
             saved.append(path)
 
-        output = generate_order_file(saved, system, output_mode, template_name)
+        generate_files = saved + server_saved
+        if not generate_files:
+            return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": "请先选择订单 Excel，或先用监听打印机导入本次面单", "debug": debug_environment()}, status_code=400)
+
+        output = generate_order_file(generate_files, system, output_mode, template_name)
         filename = os.path.basename(output)
         is_dir = os.path.isdir(output)
         download_path = zip_output_folder(output) if is_dir else output
@@ -631,8 +657,17 @@ async def api_generate(
             "download_filename": os.path.basename(download_path),
             "debug": debug_environment(),
         }
-    except Exception as e:
-        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": str(e), "traceback": traceback.format_exc(), "debug": debug_environment()}, status_code=400)
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "web_version": WEB_VERSION,
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+                "debug": debug_environment(),
+            },
+            status_code=400,
+        )
     finally:
         for path in saved:
             try:

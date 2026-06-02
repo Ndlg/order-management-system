@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
@@ -287,6 +287,16 @@
 
     .btn.secondary:hover { background: #eef5ff; }
 
+    .btn.success {
+      background: var(--green);
+      color: #fff;
+    }
+
+    .btn.danger {
+      background: var(--red);
+      color: #fff;
+    }
+
     .btn:disabled {
       opacity: .6;
       cursor: not-allowed;
@@ -298,6 +308,124 @@
       gap: 10px;
       flex-wrap: wrap;
       margin-top: 18px;
+    }
+
+    .monitor-box {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fbff;
+    }
+
+    .monitor-main {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .monitor-title {
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+
+    .monitor-detail {
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .collector-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .collector-empty,
+    .collector-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 10px 12px;
+    }
+
+    .collector-empty {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .collector-card.offline {
+      opacity: .72;
+    }
+
+    .collector-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .collector-name {
+      min-width: 0;
+      font-weight: 800;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .collector-pill {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #64748b;
+      background: #eef2f7;
+    }
+
+    .collector-pill.online {
+      color: #047857;
+      background: #dff8ed;
+    }
+
+    .collector-meta,
+    .collector-foot {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+    }
+
+    .collector-foot {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .monitor-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+      min-width: 0;
+    }
+
+    .monitor-actions .btn {
+      flex: 0 0 auto;
+    }
+
+    #waybillRawDownload,
+    #waybillProcessedDownload {
+      flex: 1 1 280px;
+      min-width: 220px;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .status {
@@ -418,6 +546,7 @@
       .form-grid { grid-template-columns: 1fr; }
       .mode-group { grid-template-columns: 1fr; }
       .file-zone { align-items: stretch; flex-direction: column; }
+      .monitor-actions { justify-content: flex-start; }
       .download-box { align-items: stretch; flex-direction: column; }
       .download-link { width: 100%; }
     }
@@ -441,11 +570,11 @@
 
     <section class="stats" aria-label="系统状态">
       <div class="stat">
-        <div class="label">分类规则</div>
+        <div class="label">鞋款分类</div>
         <div id="categoryCount" class="value">-</div>
       </div>
       <div class="stat">
-        <div class="label">档口规则</div>
+        <div class="label">鞋款档口</div>
         <div id="stallCount" class="value">-</div>
       </div>
       <div class="stat">
@@ -467,11 +596,28 @@
               <label class="file-zone" for="files">
                 <span class="file-main">
                   <span class="file-title">选择或拖入订单文件</span>
-                  <span id="fileDetail" class="file-detail">支持多选 .xlsx / .xls</span>
+                  <span id="fileDetail" class="file-detail">核心字段：商品简称 / 规格 / 尺码 / 数量 / 备注</span>
                 </span>
                 <span class="btn secondary">选择文件</span>
               </label>
               <input id="files" class="file-input" type="file" multiple accept=".xlsx,.xls" />
+            </div>
+
+            <div class="field full">
+              <label>监听打印机面单</label>
+              <div class="monitor-box">
+                <div class="monitor-main">
+                  <div class="monitor-title">业务机同步采集本次打印信息原文</div>
+                  <div id="waybillDetail" class="monitor-detail">读取业务机监听状态中...</div>
+                  <div id="waybillCollectors" class="collector-list" aria-live="polite"></div>
+                </div>
+                <div class="monitor-actions">
+                  <button id="waybillStart" class="btn success" type="button" onclick="startWaybillMonitor()">开始监听</button>
+                  <button id="waybillStop" class="btn danger" type="button" onclick="stopWaybillMonitor()" disabled>结束监听并加入待处理</button>
+                  <a id="waybillRawDownload" class="btn secondary" href="#" style="display:none;">下载原始文档</a>
+                  <a id="waybillProcessedDownload" class="btn secondary" href="#" style="display:none;">下载识别文档</a>
+                </div>
+              </div>
             </div>
 
             <div class="field">
@@ -490,11 +636,11 @@
                 </label>
                 <label class="mode-option">
                   <input type="radio" name="mode" value="按档口分Sheet" checked />
-                  <span>档口Sheet</span>
+                  <span>鞋款档口Sheet</span>
                 </label>
                 <label class="mode-option">
                   <input type="radio" name="mode" value="按档口分文档" />
-                  <span>档口文档</span>
+                  <span>鞋款档口文档</span>
                 </label>
               </div>
             </div>
@@ -540,6 +686,19 @@ const fileDetail = document.getElementById('fileDetail');
 const statusEl = document.getElementById('status');
 const buttonEl = document.getElementById('btn');
 const buttonText = document.getElementById('btnText');
+const waybillDetail = document.getElementById('waybillDetail');
+const waybillCollectors = document.getElementById('waybillCollectors');
+const waybillStart = document.getElementById('waybillStart');
+const waybillStop = document.getElementById('waybillStop');
+const waybillRawDownload = document.getElementById('waybillRawDownload');
+const waybillProcessedDownload = document.getElementById('waybillProcessedDownload');
+const WAYBILL_RAW_TEMPLATE_NAME = '监控面单-原文模式';
+const WAYBILL_PROCESSED_TEMPLATE_NAME = '监控面单-识别结果模式';
+let serverFiles = [];
+
+document.getElementById('template').addEventListener('change', () => {
+  syncTemplateLabels();
+});
 
 function currentMode() {
   const checked = document.querySelector('input[name="mode"]:checked');
@@ -586,17 +745,213 @@ function setLoading(loading) {
 function updateFileDetail() {
   const files = Array.from(filesInput.files || []);
   if (!files.length) {
-    fileDetail.textContent = '支持多选 .xlsx / .xls';
+    if (!serverFiles.length) {
+      fileDetail.textContent = '核心字段：商品简称 / 规格 / 尺码 / 数量 / 备注';
+    }
     return;
   }
-  const totalMB = files.reduce((sum, file) => sum + file.size, 0) / 1024 / 1024;
-  fileDetail.textContent = `${files.length} 个文件，约 ${totalMB.toFixed(1)} MB`;
+  serverFiles = [];
+  setWaybillDownloads('', '', '', '');
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+  const totalText = totalBytes < 1024 * 1024
+    ? `${Math.max(1, Math.round(totalBytes / 1024))} KB`
+    : `${(totalBytes / 1024 / 1024).toFixed(1)} MB`;
+  fileDetail.textContent = `${files.length} 个文件，约 ${totalText}`;
+}
+
+function setWaybillButtons(active) {
+  waybillStart.disabled = active;
+  waybillStop.disabled = !active;
+}
+
+function setWaybillText(text) {
+  waybillDetail.textContent = text;
+}
+
+function setDownloadLink(link, path, filename, fallbackLabel) {
+  if (!path) {
+    link.style.display = 'none';
+    link.removeAttribute('href');
+    return;
+  }
+  link.href = `/api/download?path=${encodeURIComponent(path)}`;
+  link.textContent = filename ? `下载 ${filename}` : fallbackLabel;
+  link.style.display = '';
+}
+
+function setWaybillDownloads(rawPath, rawFilename, processedPath, processedFilename) {
+  setDownloadLink(waybillRawDownload, rawPath, rawFilename, '下载原始文档');
+  setDownloadLink(waybillProcessedDownload, processedPath, processedFilename, '下载识别文档');
+}
+
+function selectedTemplateName() {
+  const sel = document.getElementById('template');
+  return sel ? (sel.value || '') : '';
+}
+
+function syncTemplateLabels(name) {
+  const value = name || selectedTemplateName() || '-';
+  document.getElementById('templateTag').textContent = value === '-' ? '已加载模板' : value;
+  document.getElementById('activeTemplate').textContent = value;
+}
+
+function appendText(parent, className, text, tagName = 'div') {
+  const node = document.createElement(tagName);
+  node.className = className;
+  node.textContent = text;
+  parent.appendChild(node);
+  return node;
+}
+
+function collectorComponentText(row) {
+  const components = Array.isArray(row.components) ? row.components : [];
+  const total = Number(row.component_count || components.length || 0);
+  const available = Number(row.available_components || components.filter(item => item && item.exists).length || 0);
+  return total ? `组件 ${available}/${total}` : '组件未上报';
+}
+
+function collectorUploadText(row) {
+  if (!row.uploaded) return '未回传';
+  const records = Number(row.uploaded_records || 0);
+  return `已回传 ${records} 条`;
+}
+
+function renderWaybillCollectors(collectors) {
+  waybillCollectors.textContent = '';
+  if (!collectors.length) {
+    appendText(waybillCollectors, 'collector-empty', '暂无业务机连接。业务机监听服务连上服务器后，会自动新增到这里。');
+    return;
+  }
+
+  collectors.forEach((row) => {
+    const card = document.createElement('div');
+    card.className = `collector-card ${row.online ? 'online' : 'offline'}`.trim();
+
+    const head = document.createElement('div');
+    head.className = 'collector-head';
+    appendText(head, 'collector-name', row.machine_label || row.machine_name || row.client_id || '未命名业务机');
+    appendText(head, `collector-pill ${row.online ? 'online' : ''}`.trim(), row.online ? '在线' : '离线', 'span');
+    card.appendChild(head);
+
+    const identity = row.hostname || row.machine_name || row.client_id || '-';
+    appendText(card, 'collector-meta', identity);
+
+    const foot = document.createElement('div');
+    foot.className = 'collector-foot';
+    appendText(foot, 'collector-meta', collectorComponentText(row), 'span');
+    appendText(foot, 'collector-meta', collectorUploadText(row), 'span');
+    card.appendChild(foot);
+
+    waybillCollectors.appendChild(card);
+  });
+}
+
+function selectTemplate(name) {
+  const sel = document.getElementById('template');
+  if ([...sel.options].some((opt) => opt.value === name)) {
+    sel.value = name;
+    syncTemplateLabels(name);
+  }
+}
+
+async function refreshWaybillStatus() {
+  try {
+    const r = await fetch('/api/waybill/status', { cache: 'no-store' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || '读取失败');
+    setWaybillButtons(!!d.active);
+    const collectors = d.collectors || [];
+    renderWaybillCollectors(collectors);
+    setWaybillDownloads(
+      d.last_raw_file || '',
+      d.last_raw_filename || '',
+      d.last_processed_file || '',
+      d.last_processed_filename || ''
+    );
+    const totalCollectors = d.collector_count || collectors.length || 0;
+    const onlineCollectors = d.online_collectors || collectors.filter(row => row.online).length || 0;
+    const collectorText = totalCollectors ? `已连接 ${totalCollectors} 台，在线 ${onlineCollectors} 台` : '暂无业务机连接';
+    const uploadedText = d.uploaded_collectors ? `，已回传 ${d.uploaded_collectors} 台` : '';
+    if (d.active) {
+      selectTemplate(d.template_name || WAYBILL_RAW_TEMPLATE_NAME);
+      setWaybillText(`监听中，批次 ${d.batch_id || '-'}，${collectorText}${uploadedText}，本次新面单 ${d.session_records || 0} 条`);
+    } else if (d.last_raw_file || d.last_processed_file) {
+      const loadedCurrentFile = d.last_processed_file && serverFiles.includes(d.last_processed_file);
+      setWaybillText(
+        loadedCurrentFile
+          ? `本次监听已识别 ${d.last_processed_count || 0} 条。${collectorText}`
+          : `未启动。${collectorText}。有历史原始/识别文件可下载（原始 ${d.last_raw_count || 0} 条，识别 ${d.last_processed_count || 0} 条），不会自动参与本次生成`
+      );
+    } else {
+      setWaybillText(`未启动。${collectorText}。点击开始后由业务机监听服务记录本机打印基准`);
+    }
+  } catch (e) {
+    setWaybillButtons(false);
+    renderWaybillCollectors([]);
+    setWaybillText(`监听状态读取失败：${e.message}`);
+    setWaybillDownloads('', '', '', '');
+  }
+}
+
+async function startWaybillMonitor() {
+  try {
+    const r = await fetch('/api/waybill/start', { method: 'POST', cache: 'no-store' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || '启动失败');
+    serverFiles = [];
+    filesInput.value = '';
+    selectTemplate(d.template_name || WAYBILL_RAW_TEMPLATE_NAME);
+    fileDetail.textContent = `打印机监听中，本次从 ${d.started_at || '现在'} 开始统计`;
+    setWaybillButtons(true);
+    setWaybillDownloads('', '', '', '');
+    renderWaybillCollectors(d.collectors || []);
+    setWaybillText(`监听中，批次 ${d.batch_id || '-'}。已连接的业务机会各自记录本机基准。`);
+    setStatus('ok', '打印机监听已启动', '现在让已连接的业务机正常打印面单；打印完成后点击“结束监听并加入待处理”。');
+  } catch (e) {
+    setStatus('err', '打印机监听启动失败', e.message);
+  }
+}
+
+async function stopWaybillMonitor() {
+  try {
+    const r = await fetch('/api/waybill/stop', { method: 'POST', cache: 'no-store' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || '结束失败');
+    setWaybillButtons(false);
+    renderWaybillCollectors(d.collectors || []);
+
+    if (!d.raw_file && !d.processed_file) {
+      serverFiles = [];
+      fileDetail.textContent = '本次监听没有新面单';
+      setWaybillDownloads('', '', '', '');
+      setStatus('ok', '监听已结束', '本次没有业务机回传新面单。');
+      return;
+    }
+
+    serverFiles = d.processed_file ? [d.processed_file] : [d.raw_file];
+    filesInput.value = '';
+    selectTemplate(d.processed_template_name || WAYBILL_PROCESSED_TEMPLATE_NAME);
+    fileDetail.textContent = `已加入识别结果：${d.processed_filename || d.processed_file || d.raw_filename || d.raw_file}（识别 ${d.processed_records || 0} 条）`;
+    setWaybillDownloads(d.raw_file || '', d.raw_filename || '', d.processed_file || '', d.processed_filename || '');
+
+    setSuccessDownload(
+      '识别结果已加入',
+      `原始文档：${d.raw_filename || d.raw_file || '-'}\n识别文档：${d.processed_filename || d.processed_file || '-'}\n已自动加入识别后的文档；现在可以点击“生成整理文档”。`,
+      d.processed_filename || d.raw_filename || '监控面单识别.xlsx',
+      `/api/download?path=${encodeURIComponent(d.processed_file || d.raw_file)}`,
+      '下载识别文档'
+    );
+  } catch (e) {
+    setStatus('err', '打印机监听结束失败', e.message);
+  } finally {
+    refreshWaybillStatus();
+  }
 }
 
 async function loadTemplates() {
   const sel = document.getElementById('template');
   try {
-    const r = await fetch('/api/templates');
+    const r = await fetch('/api/templates', { cache: 'no-store' });
     const d = await r.json();
     sel.innerHTML = '';
 
@@ -613,10 +968,13 @@ async function loadTemplates() {
       sel.appendChild(opt);
     }
 
-    if (d.active_template) {
+    if (serverFiles.length) {
+      selectTemplate(WAYBILL_PROCESSED_TEMPLATE_NAME);
+    } else if (d.active_template) {
       sel.value = d.active_template;
+      syncTemplateLabels(sel.value);
     }
-    document.getElementById('templateTag').textContent = sel.value || '已加载模板';
+    syncTemplateLabels(sel.value);
   } catch (e) {
     sel.innerHTML = '<option value="">模板读取失败</option>';
     document.getElementById('templateTag').textContent = '模板读取失败';
@@ -625,11 +983,11 @@ async function loadTemplates() {
 
 async function refreshStatus() {
   try {
-    const r = await fetch('/api/status');
+    const r = await fetch('/api/status', { cache: 'no-store' });
     const d = await r.json();
     document.getElementById('systemName').textContent = d.system_name || '-';
     document.getElementById('systemTag').textContent = d.system_name || '未配置系统';
-    document.getElementById('activeTemplate').textContent = d.active_template || '-';
+    document.getElementById('activeTemplate').textContent = selectedTemplateName() || d.active_template || '-';
     document.getElementById('webversion').textContent = `Web后端版本：${d.web_version || '未返回版本号'}`;
     document.getElementById('categoryCount').textContent = d.category_rules ?? 0;
     document.getElementById('stallCount').textContent = d.stall_rules ?? 0;
@@ -640,15 +998,16 @@ async function refreshStatus() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadTemplates(), refreshStatus()]);
+  await loadTemplates();
+  await Promise.all([refreshStatus(), refreshWaybillStatus()]);
 }
 
 async function generate() {
   const files = filesInput.files;
   const template = document.getElementById('template').value;
 
-  if (!files.length) {
-    setStatus('err', '缺少订单文件', '请先选择订单 Excel。');
+  if (!files.length && !serverFiles.length) {
+    setStatus('err', '缺少订单文件', '请先选择订单 Excel，或先用“监听打印机面单”导入本次面单。');
     return;
   }
 
@@ -659,6 +1018,7 @@ async function generate() {
 
   const fd = new FormData();
   for (const f of files) fd.append('files', f);
+  if (serverFiles.length) fd.append('server_files', JSON.stringify(serverFiles));
   fd.append('output_mode', currentMode());
   fd.append('template_name', template);
 
@@ -683,9 +1043,9 @@ async function generate() {
 
     const downloadPath = d.download_path || d.path;
     const downloadUrl = `/api/download?path=${encodeURIComponent(downloadPath)}`;
-    const title = d.is_dir ? '档口文档已打包' : '整理文档已生成';
+    const title = d.is_dir ? '鞋款档口文档已打包' : '整理文档已生成';
     const message = d.is_dir
-      ? `输出文件夹：${d.filename}\n全部档口文档已打包为压缩包。`
+      ? `输出文件夹：${d.filename}\n全部鞋款档口文档已打包为压缩包。`
       : `输出文件：${d.filename}`;
     const label = d.is_dir ? '下载压缩包' : '下载文档';
     setSuccessDownload(title, message, d.download_filename || d.filename, downloadUrl, label);

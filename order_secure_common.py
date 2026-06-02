@@ -5,12 +5,22 @@ import hashlib
 import shutil
 import zlib
 import secrets
+import re
 from pathlib import Path
 
 try:
     from cryptography.fernet import Fernet
 except Exception:
     Fernet = None
+
+from waybill_raw_contract import (
+    LEGACY_RAW_WAYBILL_TEMPLATE_NAMES,
+    PROCESSED_WAYBILL_TEMPLATE_NAME,
+    RAW_WAYBILL_MODE,
+    RAW_WAYBILL_TEMPLATE_NAME,
+    RAW_WAYBILL_TEXT_COLUMN,
+)
+from waybill_text_parser import default_rule_config, normalize_rule_config
 
 
 # ==================================================
@@ -27,6 +37,8 @@ DATA_DIR_NAME = "data"
 DATA_FILE_NAME = "system_data.enc"
 TEMPLATE_FILE_NAME = "import_templates.json"
 DATA_SCHEMA_VERSION = "7.5.1-lite"
+DEV_WORKSPACE_DIR_NAME = "_实验开发区"
+DATA_DIR_OVERRIDE_ENV = "ORDER_SORTER_DATA_DIR"
 
 
 def get_base_dir():
@@ -36,8 +48,30 @@ def get_base_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def _shared_project_data_dir(base_dir):
+    current = Path(base_dir).resolve()
+    for folder in (current, *current.parents):
+        if folder.name == DEV_WORKSPACE_DIR_NAME:
+            shared_data = folder.parent / DATA_DIR_NAME
+            if shared_data.exists():
+                return str(shared_data)
+    return None
+
+
+def _shared_project_output_dir(base_dir):
+    current = Path(base_dir).resolve()
+    for folder in (current, *current.parents):
+        if folder.name == DEV_WORKSPACE_DIR_NAME:
+            return str(folder.parent / "output")
+    return None
+
+
 def get_data_dir():
-    path = os.path.join(get_base_dir(), DATA_DIR_NAME)
+    override = os.environ.get(DATA_DIR_OVERRIDE_ENV, "").strip()
+    if override:
+        path = os.path.abspath(os.path.expanduser(override))
+    else:
+        path = _shared_project_data_dir(get_base_dir()) or os.path.join(get_base_dir(), DATA_DIR_NAME)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -51,7 +85,7 @@ def get_template_file():
 
 
 def get_output_dir():
-    path = os.path.join(get_base_dir(), "output")
+    path = _shared_project_output_dir(get_base_dir()) or os.path.join(get_base_dir(), "output")
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -97,6 +131,38 @@ def verify_password(password, stored):
 # ==================================================
 # 默认结构
 # ==================================================
+WAYBILL_TEMPLATE_NAME = RAW_WAYBILL_TEMPLATE_NAME
+WAYBILL_IMPORT_TEMPLATE = {
+    "name": WAYBILL_TEMPLATE_NAME,
+    "mode": RAW_WAYBILL_MODE,
+    "raw_text": RAW_WAYBILL_TEXT_COLUMN,
+    "short_name": RAW_WAYBILL_TEXT_COLUMN,
+    "spec": "",
+    "size": "",
+    "qty": "",
+    "remark": "",
+    "item_sep": ";",
+    "spec_split": "，",
+}
+WAYBILL_PROCESSED_TEMPLATE_NAME = PROCESSED_WAYBILL_TEMPLATE_NAME
+WAYBILL_PROCESSED_IMPORT_TEMPLATE = {
+    "name": WAYBILL_PROCESSED_TEMPLATE_NAME,
+    "mode": "表头",
+    "short_name": "商品简称",
+    "spec": "规格",
+    "size": "尺码",
+    "qty": "数量",
+    "remark": "",
+    "item_sep": ";",
+    "spec_split": "，",
+}
+REMOVED_IMPORT_TEMPLATE_NAMES = {
+    WAYBILL_TEMPLATE_NAME,
+    *LEGACY_RAW_WAYBILL_TEMPLATE_NAMES,
+    "旧版-SV列模式",
+}
+
+
 def default_import_templates():
     return [
         {
@@ -104,26 +170,49 @@ def default_import_templates():
             "mode": "表头",
             "short_name": "商品简称",
             "spec": "销售规格",
+            "size": "",
             "qty": "商品数量",
             "remark": "备注",
             "item_sep": ";",
             "spec_split": "，"
         },
-        {
-            "name": "旧版-SV列模式",
-            "mode": "列号",
-            "title_col": "S",
-            "qty_col": "V",
-            "item_sep": ";",
-            "spec_split": "，"
-        }
+        dict(WAYBILL_PROCESSED_IMPORT_TEMPLATE),
     ]
+
+
+def ensure_default_import_templates(templates):
+    result = []
+    seen = set()
+    if isinstance(templates, list):
+        for template in templates:
+            if not isinstance(template, dict):
+                continue
+            original_name = str(template.get("name") or "").strip()
+            name = WAYBILL_TEMPLATE_NAME if original_name in LEGACY_RAW_WAYBILL_TEMPLATE_NAMES else original_name
+            mode = str(template.get("mode") or "").strip()
+            if name in REMOVED_IMPORT_TEMPLATE_NAMES or mode == RAW_WAYBILL_MODE:
+                continue
+            if not name or name in seen:
+                continue
+            item = dict(template)
+            if name == WAYBILL_PROCESSED_TEMPLATE_NAME and any(item.get(key) != value for key, value in WAYBILL_PROCESSED_IMPORT_TEMPLATE.items()):
+                item.update(WAYBILL_PROCESSED_IMPORT_TEMPLATE)
+            result.append(item)
+            seen.add(name)
+
+    for template in default_import_templates():
+        name = template.get("name", "")
+        if name and name not in seen:
+            result.append(dict(template))
+            seen.add(name)
+    return result
 
 
 def default_system():
     return {
         "name": "默认整理系统",
         "category_rules": [],
+        "waybill_parse_rules": default_rule_config(),
         "stall_map": {},
         # V7.5.1 起图片关系不再进入主数据文件，只保留空字段兼容旧代码入口。
         "image_map": {},
@@ -162,6 +251,7 @@ def normalize_system(system, name="默认整理系统"):
 
     system.setdefault("name", name)
     system.setdefault("category_rules", [])
+    system["waybill_parse_rules"] = normalize_rule_config(system.get("waybill_parse_rules"))
     system.setdefault("stall_map", {})
     # V7.5.1 放弃旧版巨型 image_map 主库结构；图片关系只放在 data/image_categories/*.json。
     system["image_map"] = {}
@@ -170,14 +260,30 @@ def normalize_system(system, name="默认整理系统"):
 
     if not isinstance(system.get("category_rules"), list):
         system["category_rules"] = []
+    else:
+        normalized_rules = []
+        for rule in system["category_rules"]:
+            if not isinstance(rule, dict):
+                continue
+            item = dict(rule)
+            item.setdefault("output_shoe", item.get("shoe_name", ""))
+            normalized_rules.append(item)
+        system["category_rules"] = normalized_rules
+    system.pop("waybill_recognition_rules", None)
 
     if not isinstance(system.get("stall_map"), dict):
         system["stall_map"] = {}
 
     if not isinstance(system.get("import_templates"), list):
         system["import_templates"] = default_import_templates()
+    else:
+        system["import_templates"] = ensure_default_import_templates(system.get("import_templates"))
 
-    if not system.get("active_template"):
+    if system.get("active_template") in REMOVED_IMPORT_TEMPLATE_NAMES:
+        system["active_template"] = WAYBILL_PROCESSED_TEMPLATE_NAME
+
+    template_names = {str(t.get("name", "") or "").strip() for t in system.get("import_templates", []) if isinstance(t, dict)}
+    if not system.get("active_template") or system.get("active_template") not in template_names:
         if system.get("import_templates"):
             system["active_template"] = system["import_templates"][0].get("name", "1688新版-表头模式")
         else:
@@ -218,6 +324,7 @@ def mirror_active_system_to_top(data):
     data["systems"][active_system] = system
 
     data["category_rules"] = system.get("category_rules", [])
+    data["waybill_parse_rules"] = system.get("waybill_parse_rules", default_rule_config())
     data["stall_map"] = system.get("stall_map", {})
     data["image_map"] = {}
     data["import_templates"] = system.get("import_templates", default_import_templates())
@@ -245,6 +352,7 @@ def normalize_data(data):
         old_system = {
             "name": "默认整理系统",
             "category_rules": data.get("category_rules", []),
+            "waybill_parse_rules": data.get("waybill_parse_rules", default_rule_config()),
             "stall_map": data.get("stall_map", {}),
             "image_map": {},
             "import_templates": data.get("import_templates", default_import_templates()),
@@ -393,7 +501,7 @@ def load_templates_fast():
             raw = Path(template_file).read_text(encoding="utf-8-sig")
             templates = json.loads(raw)
             if isinstance(templates, list):
-                return templates
+                return ensure_default_import_templates(templates)
         except Exception:
             pass
 
@@ -401,6 +509,7 @@ def load_templates_fast():
         data = load_data(auto_save_on_read=False)
         system, _ = get_active_system(data)
         templates = system.get("import_templates", []) if system else []
+        templates = ensure_default_import_templates(templates)
         save_templates_fast(templates)
         return templates
     except Exception:
@@ -411,6 +520,7 @@ def save_templates_fast(templates):
     """只保存模板轻量索引文件，不触发整库重写。"""
     try:
         os.makedirs(get_data_dir(), exist_ok=True)
+        templates = ensure_default_import_templates(templates)
         Path(get_template_file()).write_text(
             json.dumps(templates or [], ensure_ascii=False, indent=2),
             encoding="utf-8-sig"
@@ -430,6 +540,7 @@ def save_data(data):
     if active_system in data.get("systems", {}):
         system = data["systems"][active_system]
         system["category_rules"] = data.get("category_rules", system.get("category_rules", []))
+        system["waybill_parse_rules"] = data.get("waybill_parse_rules", system.get("waybill_parse_rules", default_rule_config()))
         system["stall_map"] = data.get("stall_map", system.get("stall_map", {}))
         system["image_map"] = {}
         system["import_templates"] = data.get("import_templates", system.get("import_templates", default_import_templates()))
@@ -466,6 +577,131 @@ def normalize_text(value):
 def normalize_match_text(value):
     text = normalize_text(value).casefold()
     return "".join(ch for ch in text if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
+
+
+IMAGE_MATCH_NOISE_WORDS = (
+    "近期热销",
+    "近期热卖",
+    "热销款",
+    "爆款推荐",
+    "爆款",
+    "热销",
+    "热卖",
+    "主推款",
+    "主推",
+    "推荐",
+    "现货",
+    "到货",
+    "补货",
+    "新款",
+    "特价",
+    "低价",
+    "活动",
+    "折扣",
+    "清仓",
+)
+
+
+IMAGE_MATCH_REMARK_WORDS = (
+    "订单备注",
+    "买家留言",
+    "卖家备注",
+    "商家备注",
+    "客户备注",
+    "备注",
+    "手填",
+    "手写",
+    "报货",
+    "拿货",
+    "发货",
+    "换货",
+    "换",
+    "sku",
+    "SKU",
+    "款号",
+    "款式",
+    "鞋款",
+    "货号",
+    "颜色分类",
+    "颜色",
+    "规格",
+    "尺码",
+    "码数",
+    "鞋码",
+    "size",
+    "SIZE",
+)
+
+
+IMAGE_MATCH_SPLIT_RE = re.compile(r"[\s,，;；/\\|、。.!！?？:：=＋+\-_()（）\[\]【】{}<>《》\"'“”‘’]+")
+IMAGE_MATCH_SIZE_RE = re.compile(
+    r"(?i)(?<!\d)(?:尺码|码数|鞋码|size)?\s*[:：=]?\s*(?:3[0-9]|4[0-9]|5[0-2])(?:\.5)?\s*(?:码|m|M)?(?!\d)"
+)
+IMAGE_MATCH_QTY_RE = re.compile(r"(?i)(?:x|×|\*)\s*\d+|\d+\s*(?:双|件|对)")
+
+
+def normalize_image_match_text(value):
+    text = normalize_match_text(value)
+    for word in IMAGE_MATCH_NOISE_WORDS:
+        marker = normalize_match_text(word)
+        if marker:
+            text = text.replace(marker, "")
+    return text
+
+
+def normalize_remark_match_text(value):
+    text = str(value or "")
+    text = IMAGE_MATCH_SIZE_RE.sub(" ", text)
+    text = IMAGE_MATCH_QTY_RE.sub(" ", text)
+    normalized = normalize_match_text(text)
+    for word in IMAGE_MATCH_REMARK_WORDS:
+        marker = normalize_match_text(word)
+        if marker:
+            normalized = normalized.replace(marker, "")
+    return normalize_image_match_text(normalized)
+
+
+def expand_image_match_aliases(text):
+    variants = []
+
+    def add(value):
+        value = normalize_match_text(value)
+        if value and value not in variants:
+            variants.append(value)
+
+    value = normalize_match_text(text)
+    add(value)
+    for current in list(variants):
+        if "c6" in current:
+            add(current.replace("c6", "cloud6"))
+        if "cloud6" in current:
+            add(current.replace("cloud6", "c6"))
+        if "tilt" in current and "cloudtilt" not in current:
+            add(current.replace("tilt", "cloudtilt"))
+        if "cloudtilt" in current:
+            add(current.replace("cloudtilt", "tilt"))
+
+    for current in list(variants):
+        for old, new in (("咖啡", "卡"), ("浅咖", "浅卡"), ("灰白色", "浅灰"), ("灰白", "浅灰")):
+            if old in current:
+                add(current.replace(old, new))
+    return [v for v in variants if v]
+
+
+def normalize_image_aliases(value):
+    if isinstance(value, (list, tuple, set)):
+        raw_parts = []
+        for item in value:
+            raw_parts.extend(re.split(r"[\n\r,，;；、/]+", str(item or "")))
+    else:
+        raw_parts = re.split(r"[\n\r,，;；、/]+", str(value or ""))
+
+    aliases = []
+    for part in raw_parts:
+        alias = normalize_text(part)
+        if alias and alias not in aliases:
+            aliases.append(alias)
+    return aliases
 
 
 def make_image_key(category, spec):
@@ -589,6 +825,11 @@ def save_image_category_map(category, bucket):
             continue
         item["category"] = item_category
         item["spec"] = spec
+        aliases = [alias for alias in normalize_image_aliases(item.get("aliases", [])) if alias != spec]
+        if aliases:
+            item["aliases"] = aliases
+        else:
+            item.pop("aliases", None)
         item.pop("image_base64", None)
         cleaned[make_image_key(item_category, spec)] = item
 
@@ -603,7 +844,7 @@ def save_image_category_map(category, bucket):
     return fp
 
 
-def upsert_image_binding(category, spec, source_path="", image_bytes=None, filename="image.png"):
+def upsert_image_binding(category, spec, source_path="", image_bytes=None, filename="image.png", aliases=None):
     category = normalize_text(category)
     spec = normalize_text(spec)
     if not category or not spec:
@@ -617,14 +858,50 @@ def upsert_image_binding(category, spec, source_path="", image_bytes=None, filen
         raise ValueError("图片文件无效")
 
     bucket = load_image_category_map(category)
+    key = make_image_key(category, spec)
+    old_item = bucket.get(key, {}) if isinstance(bucket.get(key, {}), dict) else {}
+    alias_list = normalize_image_aliases(old_item.get("aliases", []) if aliases is None else aliases)
+    alias_list = [alias for alias in alias_list if alias != spec]
     bucket[make_image_key(category, spec)] = {
         "category": category,
         "spec": spec,
         "filename": os.path.basename(filename or source_path or "image.png"),
         "image_file": image_file
     }
+    if alias_list:
+        bucket[key]["aliases"] = alias_list
     save_image_category_map(category, bucket)
     return bucket[make_image_key(category, spec)]
+
+
+def update_image_binding(old_category, old_spec, new_category, new_spec, aliases=None):
+    old_category = normalize_text(old_category)
+    old_spec = normalize_text(old_spec)
+    new_category = normalize_text(new_category)
+    new_spec = normalize_text(new_spec)
+    if not old_category or not old_spec or not new_category or not new_spec:
+        raise ValueError("分类和规格不能为空")
+
+    old_bucket = load_image_category_map(old_category)
+    old_key = make_image_key(old_category, old_spec)
+    item = old_bucket.pop(old_key, None)
+    if not isinstance(item, dict):
+        raise ValueError("找不到要修改的图片关系")
+
+    alias_list = normalize_image_aliases(aliases)
+    alias_list = [alias for alias in alias_list if alias != new_spec]
+    item["category"] = new_category
+    item["spec"] = new_spec
+    if alias_list:
+        item["aliases"] = alias_list
+    else:
+        item.pop("aliases", None)
+
+    save_image_category_map(old_category, old_bucket)
+    new_bucket = load_image_category_map(new_category)
+    new_bucket[make_image_key(new_category, new_spec)] = item
+    save_image_category_map(new_category, new_bucket)
+    return item
 
 
 def delete_image_binding(category, spec):
@@ -661,7 +938,15 @@ def iter_image_bindings(category_filter="", keyword="", max_items=None):
     keyword = normalize_text(keyword)
     categories = list_image_category_names()
     if category_filter and category_filter != "全部分类":
-        categories = [c for c in categories if normalize_text(c) == category_filter]
+        marker = normalize_match_text(category_filter)
+        matched = []
+        for category in categories:
+            category_marker = normalize_match_text(category)
+            if normalize_text(category) == category_filter or category_marker == marker:
+                matched.append(category)
+            elif marker and len(marker) >= 2 and category_marker and (marker in category_marker or category_marker in marker):
+                matched.append(category)
+        categories = matched
 
     shown = 0
     total = 0
@@ -677,7 +962,8 @@ def iter_image_bindings(category_filter="", keyword="", max_items=None):
                 cat, spec = raw_key.split("|", 1)
                 cat = normalize_text(cat)
                 spec = normalize_text(spec)
-            if keyword and keyword not in (cat + spec):
+            aliases = normalize_image_aliases(item.get("aliases", []))
+            if keyword and keyword not in (cat + spec + "".join(aliases)):
                 continue
             yield make_image_key(cat, spec), item
             shown += 1
@@ -732,6 +1018,11 @@ def save_image_category_cache(image_map):
             continue
         item["category"] = category
         item["spec"] = spec
+        aliases = [alias for alias in normalize_image_aliases(item.get("aliases", [])) if alias != spec]
+        if aliases:
+            item["aliases"] = aliases
+        else:
+            item.pop("aliases", None)
         if item.get("image_base64") and not item.get("image_file"):
             image_file = decode_image_base64_to_file(item.get("image_base64"), category, spec)
             if image_file:
@@ -756,16 +1047,51 @@ def load_image_map_for_categories(system, categories):
     if not categories_norm:
         return {}
 
+    available = list_image_category_names()
+    available_by_match = {}
+    for name in available:
+        marker = normalize_match_text(name)
+        if marker:
+            available_by_match.setdefault(marker, []).append(name)
+
+    def matching_image_categories(category):
+        result = []
+
+        def add(value):
+            value = normalize_text(value)
+            if value and value not in result:
+                result.append(value)
+
+        add(category)
+        marker = normalize_match_text(category)
+        if marker:
+            for value in available_by_match.get(marker, []):
+                add(value)
+            if len(marker) >= 2:
+                for value in available:
+                    value_marker = normalize_match_text(value)
+                    if value_marker and (marker in value_marker or value_marker in marker):
+                        add(value)
+        return result
+
     merged = {}
     for category in categories_norm:
-        fp = _image_category_file(category)
-        if os.path.exists(fp):
+        for image_category in matching_image_categories(category):
+            fp = _image_category_file(image_category)
+            if not os.path.exists(fp):
+                continue
             try:
                 raw = Path(fp).read_text(encoding="utf-8-sig")
                 data = json.loads(raw)
                 if isinstance(data, dict):
-                    merged.update(data)
-                    continue
+                    for key, item in data.items():
+                        if isinstance(item, dict):
+                            cloned = dict(item)
+                            cloned["category"] = category
+                            spec = normalize_text(cloned.get("spec", ""))
+                            merged[make_image_key(category, spec) if spec else key] = cloned
+                        else:
+                            merged[key] = item
             except Exception:
                 pass
     return merged
@@ -852,14 +1178,27 @@ def build_image_lookup(image_map):
         item = dict(raw_item)
         item["category"] = category
         item["spec"] = spec
+        aliases = [alias for alias in normalize_image_aliases(item.get("aliases", [])) if alias != spec]
+        if aliases:
+            item["aliases"] = aliases
+        else:
+            item.pop("aliases", None)
 
         key = make_image_key(category, spec)
         by_key[key] = item
+        for alias in item.get("aliases", []):
+            by_key.setdefault(make_image_key(category, alias), item)
         by_category.setdefault(category, []).append(item)
 
     # 同分类下优先匹配更长规格，避免“黑”误命中“黑色加绒”
     for category, items in by_category.items():
-        items.sort(key=lambda x: len(normalize_text(x.get("spec", ""))), reverse=True)
+        items.sort(
+            key=lambda x: max(
+                [len(normalize_text(x.get("spec", "")))]
+                + [len(normalize_text(alias)) for alias in normalize_image_aliases(x.get("aliases", []))]
+            ),
+            reverse=True
+        )
 
     return by_key, by_category
 
@@ -875,23 +1214,106 @@ class ImageMatcher:
         self.by_key, self.by_category = build_image_lookup(image_map)
         self.cache = {}
 
-    def _continuous_match(self, item_spec, query_text):
-        item_compact = normalize_match_text(item_spec)
-        query_compact = normalize_match_text(query_text)
-        if not item_compact or not query_compact:
-            return False
+    def _match_variants(self, value, category=""):
+        raw = normalize_match_text(value)
+        clean = normalize_image_match_text(value)
+        category_norm = normalize_match_text(category)
+        variants = []
+        for text in (raw, clean):
+            if text and text not in variants:
+                variants.append(text)
+            if category_norm and text:
+                stripped = text
+                if stripped.startswith(category_norm):
+                    stripped = stripped[len(category_norm):]
+                elif stripped.endswith(category_norm):
+                    stripped = stripped[:-len(category_norm)]
+                if stripped and stripped not in variants:
+                    variants.append(stripped)
+                stripped_all = stripped.replace(category_norm, "")
+                if stripped_all and stripped_all not in variants:
+                    variants.append(stripped_all)
 
-        min_len = 2
-        if len(item_compact) >= min_len and item_compact in query_compact:
-            return True
-        if len(query_compact) >= min_len and query_compact in item_compact:
-            return True
-        return False
+        for text in list(variants):
+            if text.endswith("色") and len(text) >= 2:
+                color_short = text[:-1]
+                if color_short and color_short not in variants:
+                    variants.append(color_short)
+        for text in list(variants):
+            for alias in expand_image_match_aliases(text):
+                if alias not in variants:
+                    variants.append(alias)
+        return variants
+
+    def _query_fragments(self, value):
+        raw = str(value or "")
+        fragments = []
+
+        def add(text):
+            compact = normalize_remark_match_text(text)
+            if len(compact) >= 2 and compact not in fragments:
+                fragments.append(compact)
+
+        add(raw)
+        no_size = IMAGE_MATCH_SIZE_RE.sub(" ", raw)
+        no_qty = IMAGE_MATCH_QTY_RE.sub(" ", no_size)
+        add(no_qty)
+
+        parts = [p for p in IMAGE_MATCH_SPLIT_RE.split(no_qty) if p and p.strip()]
+        for part in parts:
+            add(part)
+        for width in (2, 3):
+            for idx in range(0, max(len(parts) - width + 1, 0)):
+                add("".join(parts[idx:idx + width]))
+
+        return fragments
+
+    def _is_safe_containment(self, container, contained):
+        if not container or not contained or contained not in container:
+            return False
+        extra = container.replace(contained, "", 1)
+        return not normalize_image_match_text(extra)
+
+    def _score_text_pair(self, item_spec, query_text, category=""):
+        item_variants = self._match_variants(item_spec, category)
+        query_variants = self._match_variants(query_text, category)
+
+        if not item_variants or not query_variants:
+            return 0
+
+        best = 0
+        for item_text in item_variants:
+            for query_value in query_variants:
+                if item_text == query_value:
+                    best = max(best, 1000 + len(query_value))
+                    continue
+
+                if len(query_value) >= 3 and self._is_safe_containment(item_text, query_value):
+                    best = max(best, 900 + len(query_value))
+
+                if len(item_text) >= 3 and self._is_safe_containment(query_value, item_text):
+                    best = max(best, 880 + len(item_text))
+
+        return best
+
+    def _candidate_specs(self, item):
+        values = [normalize_text(item.get("spec", ""))]
+        for alias in normalize_image_aliases(item.get("aliases", [])):
+            if alias and alias not in values:
+                values.append(alias)
+        return values
+
+    def _continuous_match(self, item_spec, query_text, category=""):
+        return self._score_text_pair(item_spec, query_text, category) >= 880
 
     def find(self, category, spec, *extra_texts):
         category_norm = normalize_text(category)
         spec_norm = normalize_text(spec)
-        query_texts = [spec_norm] + [normalize_text(x) for x in extra_texts if normalize_text(x)]
+        query_texts = []
+        for value in [spec_norm] + [x for x in extra_texts if normalize_text(x)]:
+            for fragment in self._query_fragments(value):
+                if fragment and fragment not in query_texts:
+                    query_texts.append(fragment)
         cache_key = (category_norm, tuple(query_texts))
 
         if cache_key in self.cache:
@@ -904,20 +1326,31 @@ class ImageMatcher:
             return item
 
         candidates = self.by_category.get(category_norm, [])
+        best_item = None
+        best_score = 0
+        best_spec_len = 10**9
         for candidate in candidates:
-            item_spec = normalize_text(candidate.get("spec", ""))
+            item_specs = self._candidate_specs(candidate)
 
-            if not item_spec:
+            if not item_specs:
                 continue
 
-            if item_spec == spec_norm:
+            if spec_norm in item_specs:
                 self.cache[cache_key] = candidate
                 return candidate
 
             for query_text in query_texts:
-                if self._continuous_match(item_spec, query_text):
-                    self.cache[cache_key] = candidate
-                    return candidate
+                for item_spec in item_specs:
+                    score = self._score_text_pair(item_spec, query_text, category_norm)
+                    spec_len = len(normalize_match_text(item_spec))
+                    if score > best_score or (score == best_score and score > 0 and spec_len < best_spec_len):
+                        best_score = score
+                        best_item = candidate
+                        best_spec_len = spec_len
+
+        if best_item and best_score >= 880:
+            self.cache[cache_key] = best_item
+            return best_item
 
         self.cache[cache_key] = None
         return None
@@ -967,6 +1400,11 @@ def normalize_image_map(image_map, migrate_base64=False):
 
         item["category"] = category
         item["spec"] = spec
+        aliases = [alias for alias in normalize_image_aliases(item.get("aliases", [])) if alias != spec]
+        if aliases:
+            item["aliases"] = aliases
+        else:
+            item.pop("aliases", None)
 
         if migrate_base64 and item.get("image_base64") and not item.get("image_file"):
             image_file = decode_image_base64_to_file(item.get("image_base64"), category, spec)
@@ -1014,14 +1452,20 @@ def repair_system_data(data, migrate_images=True):
         for t in system.get("import_templates", []):
             if not isinstance(t, dict):
                 continue
-            name = str(t.get("name", "")).strip()
+            original_name = str(t.get("name", "")).strip()
+            name = WAYBILL_TEMPLATE_NAME if original_name in LEGACY_RAW_WAYBILL_TEMPLATE_NAMES else original_name
+            mode = str(t.get("mode", "表头") or "表头").strip()
+            if name in REMOVED_IMPORT_TEMPLATE_NAMES or mode == RAW_WAYBILL_MODE:
+                continue
             if not name or name in seen_templates:
                 continue
             seen_templates.add(name)
-            mode = t.get("mode", "表头") or "表头"
-            if mode == "表头":
+            if name == WAYBILL_PROCESSED_TEMPLATE_NAME:
+                t.update(WAYBILL_PROCESSED_IMPORT_TEMPLATE)
+            elif mode == "表头":
                 t.setdefault("short_name", "商品简称")
                 t.setdefault("spec", "销售规格")
+                t.setdefault("size", "")
                 t.setdefault("qty", "商品数量")
                 t.setdefault("remark", "备注")
             else:
@@ -1088,7 +1532,7 @@ def repair_system_data(data, migrate_images=True):
     return mirror_active_system_to_top(data), summary
 
 
-def preview_data_summary(data=None, max_items=8):
+def preview_data_summary(data=None, max_items=8, count_image_entries=True):
     if data is None:
         data = load_data()
     data = normalize_data(data)
@@ -1097,8 +1541,11 @@ def preview_data_summary(data=None, max_items=8):
     templates = system.get("import_templates", [])
     rules = system.get("category_rules", [])
     stalls = system.get("stall_map", {})
-    image_stats = image_storage_summary(count_entries=True)
+    image_stats = image_storage_summary(count_entries=count_image_entries)
     image_categories = list_image_category_names()
+    image_entries = image_stats.get("entries")
+    if image_entries is None:
+        image_entries = image_stats.get("image_files", 0)
 
     return {
         "system_id": sid,
@@ -1106,7 +1553,7 @@ def preview_data_summary(data=None, max_items=8):
         "templates_count": len(templates),
         "rules_count": len(rules),
         "stalls_count": len(stalls),
-        "images_count": image_stats.get("entries") or 0,
+        "images_count": image_entries or 0,
         "image_category_files": image_stats.get("category_files", 0),
         "image_storage_mb": round((image_stats.get("bytes", 0) or 0) / 1024 / 1024, 2),
         "templates_preview": [t.get("name", "") for t in templates[:max_items] if isinstance(t, dict)],

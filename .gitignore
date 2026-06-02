@@ -7,7 +7,6 @@ __pycache__/
 build/
 dist/
 *.spec
-release/
 
 # Runtime data
 data/
@@ -16,6 +15,16 @@ temp/
 uploads/
 browser_profile/
 sku_output/
+
+# Local workspaces and archives
+_实验开发区/
+_整理归档_*/
+dist_v*_test/
+
+# Local collector/browser workspaces
+采集工具/*/.git/
+采集工具/*/browser_profile/
+采集工具/*/tools/
 
 # Local files
 .env
