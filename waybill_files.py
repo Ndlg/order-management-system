@@ -22,6 +22,7 @@ FIELDS = [
     ("source_client_id", "采集端ID"),
     ("source_machine", "来源机器"),
     ("source_record_index", "来源序号"),
+    ("extract_status", "采集状态"),
     ("print_text", "打印信息"),
 ]
 
@@ -155,19 +156,19 @@ def write_jsonl(path: Path, records: list[dict]) -> None:
     tmp = path.with_suffix(".tmp.jsonl")
     with tmp.open("w", encoding="utf-8", newline="\n") as f:
         for record in records:
-            raw_text = raw_record_text(record)
-            if raw_text:
-                payload = {
-                    "打印信息": raw_text,
-                    "task_id": record.get("task_id", ""),
-                    "document_id": record.get("document_id", ""),
-                    "task_time": record.get("task_time", ""),
-                    "source_client_id": record.get("source_client_id", ""),
-                    "source_record_index": record.get("source_record_index", ""),
-                    "machine_name": record.get("machine_name", ""),
-                    "machine_label": record.get("machine_label", ""),
-                }
-                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            raw_text = raw_record_text(record) or "[无打印信息]"
+            payload = {
+                "打印信息": raw_text,
+                "task_id": record.get("task_id", ""),
+                "document_id": record.get("document_id", ""),
+                "task_time": record.get("task_time", ""),
+                "source_client_id": record.get("source_client_id", ""),
+                "source_record_index": record.get("source_record_index", ""),
+                "machine_name": record.get("machine_name", ""),
+                "machine_label": record.get("machine_label", ""),
+                "extract_status": record.get("extract_status", ""),
+            }
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     os.replace(tmp, path)
 
 
@@ -226,7 +227,7 @@ def write_xlsx(path: Path, records: list[dict]) -> None:
             ws.cell(row=row_index, column=col, value=value)
         ws.cell(row=row_index, column=len(FIELDS)).alignment = Alignment(wrap_text=True, vertical="top")
 
-    widths = [24, 24, 20, 28, 22, 12, 100]
+    widths = [24, 24, 20, 28, 22, 12, 16, 100]
     for col, width in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
 
@@ -270,9 +271,7 @@ def export_records(records: list[dict], merge_existing: bool = True, batch_tag: 
 def build_raw_waybill_rows(records: list[dict]) -> list[dict]:
     rows = []
     for record in records:
-        raw_text = raw_record_text(record)
-        if not raw_text:
-            continue
+        raw_text = raw_record_text(record) or "[无打印信息]"
         row = record_tracking_values(record)
         row[RAW_WAYBILL_TEXT_COLUMN] = raw_text
         rows.append(row)

@@ -12,8 +12,10 @@ from __future__ import annotations
 import argparse
 import mimetypes
 import os
+import re
 import shutil
 import sys
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -25,13 +27,16 @@ import pandas as pd
 
 from order_secure_common import (
     ImageMatcher,
+    cleanup_unused_image_files,
     get_active_system,
     get_data_dir,
     get_image_category_dir,
     get_output_dir,
     image_storage_summary,
     load_data,
+    load_image_category_map,
     load_image_map_for_categories,
+    make_image_key,
     normalize_image_aliases,
     normalize_match_text,
     normalize_text,
@@ -40,6 +45,7 @@ from order_secure_common import (
 
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+DIANTOUSHI_SKU_DIR = "SKU图"
 DEFAULT_TIMEOUT = 25
 DEFAULT_MAX_IMAGE_MB = 20
 
@@ -402,6 +408,113 @@ def write_report(records: list[dict], path: Path) -> Path:
     return path
 
 
+def clean_diantoushi_sku_spec(name: str) -> str:
+    stem = Path(str(name or "")).stem
+    stem = stem.replace("ＳＫＵ图", "SKU图")
+    stem = stem.replace("sku图", "SKU图")
+    stem = stem.replace("SKU圖", "SKU图")
+    stem = normalize_text(stem).strip("_- ")
+    # 店透视文件名通常是：SKU图_01_PAF联名米色.png
+    stem = re.sub(r"^SKU图[_\-\s]*\d+[_\-\s]*", "", stem, flags=re.I)
+    stem = re.sub(r"^SKU[_\-\s]*\d+[_\-\s]*", "", stem, flags=re.I)
+    return normalize_text(stem)
+
+
+def is_diantoushi_sku_member(name: str) -> bool:
+    normalized = str(name or "").replace("\\", "/")
+    filename = Path(normalized).name
+    if Path(filename).suffix.lower() not in IMAGE_EXTS:
+        return False
+    return f"/{DIANTOUSHI_SKU_DIR}/" in f"/{normalized}" or filename.startswith("SKU图_")
+
+
+def import_diantoushi_zip(args: argparse.Namespace) -> tuple[dict, Path]:
+    zip_path = Path(args.input).resolve()
+    category = normalize_text(getattr(args, "category", "") or getattr(args, "default_category", ""))
+    if not category:
+        raise ValueError("请先定义鞋款名称")
+    if not zip_path.exists() or zip_path.suffix.lower() != ".zip":
+        raise ValueError("请选择店透视下载出来的 .zip 文件")
+
+    report: list[dict] = []
+    backup_path = ""
+    if not args.dry_run and not getattr(args, "no_backup", False):
+        backup_path = str(backup_image_category_files())
+
+    counters = {
+        "total": 0,
+        "imported": 0,
+        "overwritten": 0,
+        "would_import": 0,
+        "skipped": 0,
+        "failed": 0,
+        "backup": backup_path,
+        "deleted_images": 0,
+    }
+
+    with zipfile.ZipFile(zip_path) as archive:
+        members = [item for item in archive.infolist() if not item.is_dir() and is_diantoushi_sku_member(item.filename)]
+        members.sort(key=lambda item: item.filename)
+        counters["total"] = len(members)
+        for index, member in enumerate(members, 1):
+            filename = Path(member.filename.replace("\\", "/")).name
+            spec = clean_diantoushi_sku_spec(filename)
+            record = {
+                "行号": index,
+                "状态": "",
+                "鞋款": category,
+                "规格": spec,
+                "别名": "",
+                "图片来源": "店透视ZIP",
+                "图片文件": filename,
+                "说明": member.filename,
+            }
+            if not spec:
+                record["状态"] = "跳过"
+                record["说明"] = f"无法从文件名识别规格：{member.filename}"
+                counters["skipped"] += 1
+                report.append(record)
+                continue
+
+            if args.dry_run:
+                record["状态"] = "预览"
+                counters["would_import"] += 1
+                report.append(record)
+                continue
+
+            try:
+                existing = make_image_key(category, spec) in load_image_category_map(category)
+                saved = upsert_image_binding(
+                    category,
+                    spec,
+                    image_bytes=archive.read(member),
+                    filename=filename,
+                    aliases=[],
+                )
+                record["状态"] = "已覆盖" if existing else "已导入"
+                record["图片文件"] = saved.get("image_file", filename)
+                counters["imported"] += 1
+                if existing:
+                    counters["overwritten"] += 1
+            except Exception as exc:
+                record["状态"] = "失败"
+                record["说明"] = f"写入失败：{exc}"
+                counters["failed"] += 1
+            report.append(record)
+
+    if counters["total"] <= 0:
+        raise ValueError("ZIP 里没有找到 SKU图 文件夹或 SKU图_ 开头的图片")
+
+    if not args.dry_run and counters["imported"] > 0:
+        cleanup = cleanup_unused_image_files()
+        counters["deleted_images"] = cleanup.get("deleted", 0)
+        counters["freed_bytes"] = cleanup.get("freed_bytes", 0)
+
+    report_path = Path(args.report).resolve() if getattr(args, "report", "") else output_path("店透视SKU图片导入报告")
+    write_report(report, report_path)
+    return counters, report_path
+
+
 def create_template(args: argparse.Namespace) -> Path:
     out = Path(args.out).resolve() if args.out else output_path("SKU图片绑定模板")
     sample = {
@@ -434,10 +547,12 @@ def import_bindings(args: argparse.Namespace) -> tuple[dict, Path]:
     counters = {
         "total": len(rows),
         "imported": 0,
+        "overwritten": 0,
         "would_import": 0,
         "skipped": 0,
         "failed": 0,
         "backup": backup_path,
+        "deleted_images": 0,
     }
 
     for item in rows:
@@ -477,6 +592,7 @@ def import_bindings(args: argparse.Namespace) -> tuple[dict, Path]:
             continue
 
         try:
+            existing = make_image_key(item.category, item.spec) in load_image_category_map(item.category)
             if source.kind == "url":
                 saved = upsert_image_binding(
                     item.category,
@@ -492,14 +608,21 @@ def import_bindings(args: argparse.Namespace) -> tuple[dict, Path]:
                     source_path=str(source.path),
                     aliases=item.aliases,
                 )
-            record["状态"] = "已导入"
+            record["状态"] = "已覆盖" if existing else "已导入"
             record["图片文件"] = saved.get("image_file", record["图片文件"])
             counters["imported"] += 1
+            if existing:
+                counters["overwritten"] += 1
         except Exception as exc:
             record["状态"] = "失败"
             record["说明"] = f"写入失败：{exc}"
             counters["failed"] += 1
         report.append(record)
+
+    if not args.dry_run and counters["imported"] > 0:
+        cleanup = cleanup_unused_image_files()
+        counters["deleted_images"] = cleanup.get("deleted", 0)
+        counters["freed_bytes"] = cleanup.get("freed_bytes", 0)
 
     report_path = Path(args.report).resolve() if args.report else output_path("SKU图片批量导入报告")
     write_report(report, report_path)
@@ -589,8 +712,10 @@ def print_import_summary(counters: dict, report_path: Path) -> None:
     if counters.get("would_import"):
         print(f"可导入：{counters['would_import']}")
     print(f"已导入：{counters['imported']}")
+    print(f"已覆盖：{counters.get('overwritten', 0)}")
     print(f"跳过：{counters['skipped']}")
     print(f"失败：{counters['failed']}")
+    print(f"清理无关系图片：{counters.get('deleted_images', 0)}")
     if counters.get("backup"):
         print(f"索引备份：{counters['backup']}")
     print(f"报告：{report_path}")
@@ -635,6 +760,13 @@ def build_parser() -> argparse.ArgumentParser:
     importer.add_argument("--max-image-mb", type=int, default=DEFAULT_MAX_IMAGE_MB, help="单张图片最大 MB")
     add_column_args(importer)
 
+    diantoushi = sub.add_parser("diantoushi-zip", help="从店透视全部图片 ZIP 直接导入 SKU 图片关系")
+    diantoushi.add_argument("input", help="店透视下载出来的 .zip 文件")
+    diantoushi.add_argument("--category", "--shoe", default="", help="要写入系统的鞋款名称")
+    diantoushi.add_argument("--report", default="", help="导入报告输出路径")
+    diantoushi.add_argument("--dry-run", action="store_true", help="只预览，不写入图片库")
+    diantoushi.add_argument("--no-backup", action="store_true", help="导入前不备份 image_categories")
+
     missing = sub.add_parser("missing", help="从订单/面单识别 Excel 生成缺图清单")
     missing.add_argument("inputs", nargs="+", help="订单、面单识别或五字段 Excel/CSV")
     missing.add_argument("--report", default="", help="缺图报告输出路径")
@@ -653,6 +785,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"模板已生成：{path}")
         elif args.command == "import":
             counters, report_path = import_bindings(args)
+            print_import_summary(counters, report_path)
+        elif args.command == "diantoushi-zip":
+            counters, report_path = import_diantoushi_zip(args)
             print_import_summary(counters, report_path)
         elif args.command == "missing":
             summary, report_path = missing_report(args)

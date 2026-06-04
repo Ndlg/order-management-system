@@ -874,6 +874,88 @@ def upsert_image_binding(category, spec, source_path="", image_bytes=None, filen
     return bucket[make_image_key(category, spec)]
 
 
+def _stored_image_path(image_file):
+    raw = str(image_file or "").strip()
+    if not raw:
+        return None
+    try:
+        if os.path.isabs(raw):
+            candidate = Path(raw).resolve()
+        else:
+            candidate = (Path(get_data_dir()) / raw.replace("\\", os.sep)).resolve()
+        images_dir = Path(get_images_dir()).resolve()
+        if candidate.is_relative_to(images_dir):
+            return candidate
+    except Exception:
+        return None
+    return None
+
+
+def referenced_image_paths():
+    refs = set()
+    for file in Path(get_image_category_dir()).glob("*.json"):
+        try:
+            data = json.loads(file.read_text(encoding="utf-8-sig"))
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        for item in data.values():
+            if not isinstance(item, dict):
+                continue
+            path = _stored_image_path(item.get("image_file") or item.get("file"))
+            if path:
+                refs.add(str(path))
+    return refs
+
+
+def cleanup_unused_image_files(dry_run=False):
+    image_dir = Path(get_images_dir()).resolve()
+    refs = referenced_image_paths()
+    stats = {
+        "total": 0,
+        "referenced": len(refs),
+        "kept": 0,
+        "deleted": 0,
+        "would_delete": 0,
+        "freed_bytes": 0,
+        "files": [],
+    }
+
+    for file in image_dir.rglob("*"):
+        if not file.is_file():
+            continue
+        stats["total"] += 1
+        try:
+            resolved = file.resolve()
+        except Exception:
+            continue
+        if str(resolved) in refs:
+            stats["kept"] += 1
+            continue
+        try:
+            size = file.stat().st_size
+            rel = str(resolved.relative_to(Path(get_data_dir()).resolve())).replace("\\", "/")
+            if dry_run:
+                stats["would_delete"] += 1
+            else:
+                file.unlink()
+                stats["deleted"] += 1
+            stats["freed_bytes"] += size
+            stats["files"].append(rel)
+        except Exception:
+            continue
+
+    if not dry_run:
+        for folder in sorted((p for p in image_dir.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
+            try:
+                folder.rmdir()
+            except OSError:
+                pass
+
+    return stats
+
+
 def update_image_binding(old_category, old_spec, new_category, new_spec, aliases=None):
     old_category = normalize_text(old_category)
     old_spec = normalize_text(old_spec)

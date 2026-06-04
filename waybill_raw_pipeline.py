@@ -19,6 +19,10 @@ from waybill_raw_contract import (
 from waybill_text_parser import normalize_raw_text, parse_waybill_raw_text
 
 
+NO_PRINT_TEXT_STATUS = "无打印信息"
+UNPARSED_STATUS = "无法解析"
+
+
 def is_waybill_raw_template(template: dict, columns) -> bool:
     headers = {str(col).strip() for col in columns}
     raw_col = raw_waybill_text_column(template)
@@ -48,15 +52,17 @@ def parse_raw_waybill_dataframe(
         raise ValueError(f"文件缺少打印信息表头：{os.path.basename(file_path)}")
 
     rows: list[dict] = []
-    temp = df.dropna(subset=[raw_col]).copy()
+    temp = df.copy()
     for _, row in temp.iterrows():
         raw_text = normalize_raw_text(row.get(raw_col, ""))
         if not raw_text:
+            if row_has_tracking(row):
+                rows.append(_raw_parse_row("", {}, NO_PRINT_TEXT_STATUS, row))
             continue
 
         parsed_rows = parse_waybill_raw_text(raw_text, "", rule_config)
         if not parsed_rows:
-            rows.append(_raw_parse_row(raw_text, {}, "空结果", row))
+            rows.append(_raw_parse_row(raw_text, {}, UNPARSED_STATUS, row))
             continue
 
         for parsed in parsed_rows:
@@ -79,11 +85,12 @@ def parse_raw_waybill_records(records: list[dict], rule_config: object | None = 
     for record in records:
         raw_text = raw_text_from_record(record)
         if not raw_text:
+            rows.append(_raw_parse_row("", {}, NO_PRINT_TEXT_STATUS, record))
             continue
 
         parsed_rows = parse_waybill_raw_text(raw_text, "", rule_config)
         if not parsed_rows:
-            rows.append(_raw_parse_row(raw_text, {}, "空结果", record))
+            rows.append(_raw_parse_row(raw_text, {}, UNPARSED_STATUS, record))
             continue
 
         for parsed in parsed_rows:
@@ -119,6 +126,19 @@ def tracking_values(source: object | None) -> dict:
         "来源机器": source_machine,
         "来源序号": get_value("来源序号") or get_value("source_record_index") or get_value("record_index"),
     }
+
+
+def row_has_tracking(row: object) -> bool:
+    if row is None:
+        return False
+    for field in RAW_WAYBILL_TRACKING_FIELDS:
+        try:
+            value = row.get(field, "")
+        except AttributeError:
+            value = ""
+        if pd.notna(value) and str(value).strip():
+            return True
+    return False
 
 
 def _raw_parse_row(raw_text: str, parsed: dict, status: str, source: object | None = None) -> dict:

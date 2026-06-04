@@ -4,8 +4,8 @@ from __future__ import annotations
 import re
 
 
-APP_VERSION = "V7.8.8_20260602"
-APP_EDITION = "面单监听任务ID保留版"
+APP_VERSION = "V7.9.1_20260604"
+APP_EDITION = "店铺直接打单识别版"
 APP_NAME = "订单整理管理系统"
 
 

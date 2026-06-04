@@ -88,6 +88,48 @@ def is_fresh_record(record: dict[str, Any], baseline_keys: set[str], baseline_ta
     return bool(current_dt and baseline_dt and current_dt > baseline_dt)
 
 
+def component_db_id(record: dict[str, Any]) -> str:
+    return str(record.get("component_db_id") or record.get("component_db_path") or "").strip().lower()
+
+
+def component_rowid(record: dict[str, Any]) -> int:
+    try:
+        return int(record.get("component_rowid") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def baseline_component_rowids(records: list[dict[str, Any]]) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for row in records:
+        db_id = component_db_id(row)
+        rowid = component_rowid(row)
+        if not db_id or rowid <= 0:
+            continue
+        result[db_id] = max(result.get(db_id, 0), rowid)
+    return result
+
+
+def is_batch_increment_record(
+    record: dict[str, Any],
+    baseline_rowids: dict[str, int],
+    baseline_keys: set[str],
+    baseline_task_times: dict[str, str],
+) -> bool:
+    db_id = component_db_id(record)
+    rowid = component_rowid(record)
+    if db_id and rowid > 0:
+        baseline = baseline_rowids.get(db_id)
+        if baseline is None:
+            return True
+        if rowid > baseline:
+            return True
+        if not record_key(record):
+            return False
+        return is_fresh_record(record, baseline_keys, baseline_task_times)
+    return is_fresh_record(record, baseline_keys, baseline_task_times)
+
+
 def log(message: str) -> None:
     line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {message}"
     print(line, flush=True)
@@ -99,12 +141,18 @@ def log(message: str) -> None:
 
 def raw_upload_record(record: dict[str, Any], index: int = 0) -> dict[str, Any]:
     raw_text = str(record.get("打印信息") or record.get("print_text_raw") or record.get("print_text") or "").strip()
+    if not raw_text:
+        raw_text = "[无打印信息]"
     return {
         "打印信息": raw_text,
         "task_id": str(record.get("task_id") or ""),
         "document_id": str(record.get("document_id") or ""),
         "task_time": str(record.get("task_time") or ""),
         "source_record_index": index,
+        "extract_status": str(record.get("extract_status") or ""),
+        "component_name": str(record.get("component_name") or ""),
+        "component_db_path": str(record.get("component_db_path") or ""),
+        "component_rowid": component_rowid(record),
     }
 
 
@@ -118,6 +166,7 @@ class BusinessWaybillService:
         self.active_batch_id = ""
         self.baseline_keys: set[str] = set()
         self.baseline_task_times: dict[str, str] = {}
+        self.baseline_rowids: dict[str, int] = {}
         self.uploaded_batches: set[str] = set()
         self.stop_event = threading.Event()
         self.last_error_text = ""
@@ -176,7 +225,9 @@ class BusinessWaybillService:
         keyed_records = [(record_key(row), row) for row in records]
         self.baseline_keys = {key for key, _row in keyed_records if key}
         self.baseline_task_times = {key: str(row.get("task_time") or "") for key, row in keyed_records if key}
-        log(f"batch_start batch={batch_id} baseline={len(records)}")
+        self.baseline_rowids = baseline_component_rowids(records)
+        component_text = ",".join(f"{Path(db_id).name}:{rowid}" for db_id, rowid in sorted(self.baseline_rowids.items()))
+        log(f"batch_start batch={batch_id} baseline={len(records)} components={component_text}")
 
     def stop_batch(self, batch_id: str) -> None:
         if batch_id in self.uploaded_batches:
@@ -184,10 +235,10 @@ class BusinessWaybillService:
         if self.active_batch_id != batch_id:
             self.start_batch(batch_id)
         records = waybill_collector_reader.collect_records()
-        fresh = [
+        batch_records = [
             row
             for row in records
-            if is_fresh_record(row, self.baseline_keys, self.baseline_task_times)
+            if is_batch_increment_record(row, self.baseline_rowids, self.baseline_keys, self.baseline_task_times)
         ]
         response = post_json(
             self.server_url,
@@ -199,15 +250,20 @@ class BusinessWaybillService:
                 "hostname": socket.gethostname(),
                 "username": getpass.getuser(),
                 "batch_id": batch_id,
-                "records": [raw_upload_record(row, index) for index, row in enumerate(fresh, 1)],
-                "records_found": len(records),
+                "records": [raw_upload_record(row, index) for index, row in enumerate(batch_records, 1)],
+                "records_found": len(batch_records),
+                "records_scanned": len(records),
                 "capture_mode": "raw_waybill",
+                "upload_mode": "batch_rowid_increment_preserve_all_content",
             },
         )
         if response.get("ok"):
             self.uploaded_batches.add(batch_id)
             self.active_batch_id = ""
-            log(f"batch_uploaded batch={batch_id} records={len(fresh)}")
+            log(
+                f"batch_uploaded batch={batch_id} records={len(batch_records)} "
+                f"found={len(records)} mode=batch_rowid_increment_preserve_all_content"
+            )
         else:
             log(f"upload_rejected batch={batch_id} response={response}")
 

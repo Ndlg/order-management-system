@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import (
 from app_info import APP_EDITION, APP_NAME, APP_VERSION, display_version
 from order_secure_common import (
     backup_data_file,
+    cleanup_unused_image_files,
     delete_image_binding,
     get_active_system,
     get_data_dir,
@@ -94,6 +96,7 @@ from sku_image_binder import (
     DEFAULT_MAX_IMAGE_MB,
     DEFAULT_TIMEOUT,
     create_template as create_sku_image_template_file,
+    import_diantoushi_zip as import_diantoushi_zip_file,
     import_bindings as import_sku_image_bindings_file,
     missing_report as create_missing_image_report_file,
 )
@@ -673,6 +676,7 @@ class AdminWindow(QMainWindow):
             ("生成SKU图片模板", self.create_sku_image_template, False),
             ("预览批量导入", lambda: self.run_sku_image_import(dry_run=True), False),
             ("批量导入图片", lambda: self.run_sku_image_import(dry_run=False), True),
+            ("导入店透视ZIP", self.import_diantoushi_sku_zip, True),
             ("生成缺图清单", self.create_missing_image_report, False),
         ]:
             btn = make_button(text, primary=primary)
@@ -758,8 +762,9 @@ class AdminWindow(QMainWindow):
             ("打开图片索引", lambda: open_path(get_image_category_dir())),
             ("打开输出目录", lambda: open_path(get_output_dir())),
             ("备份主数据", self.backup_data),
+            ("清理无关系图片", self.cleanup_unused_images),
         ]:
-            btn = make_button(text, primary=text == "备份主数据")
+            btn = make_button(text, primary=text == "备份主数据", danger=text == "清理无关系图片")
             btn.clicked.connect(action)
             buttons.addWidget(btn)
         buttons.addStretch(1)
@@ -1852,15 +1857,113 @@ class AdminWindow(QMainWindow):
             message = (
                 f"总行数：{counters['total']}\n"
                 f"已导入：{counters['imported']}\n"
+                f"已覆盖：{counters.get('overwritten', 0)}\n"
                 f"可导入：{counters.get('would_import', 0)}\n"
                 f"跳过：{counters['skipped']}\n"
                 f"失败：{counters['failed']}\n\n"
+                f"清理无关系图片：{counters.get('deleted_images', 0)}\n\n"
                 f"报告：{report_path}"
             )
             show_info(self, title, message)
             open_file_or_folder(str(report_path))
         except Exception as exc:
             show_error(self, "批量处理失败", exc)
+
+    def import_diantoushi_sku_zip(self):
+        default_name = self.image_category_filter.currentText() if hasattr(self, "image_category_filter") else ""
+        if default_name in {"全部鞋款", "全部鞋款分类", "全部分类"}:
+            default_name = ""
+        category, ok = QInputDialog.getText(
+            self,
+            "定义鞋款名称",
+            "请输入系统里要识别的鞋款名称：",
+            text=default_name,
+        )
+        category = normalize_text(category)
+        if not ok:
+            return
+        if not category:
+            show_info(self, "缺少鞋款名称", "导入店透视 ZIP 前必须先定义鞋款名称。")
+            return
+        downloads_dir = str(Path.home() / "Downloads")
+        if not os.path.isdir(downloads_dir):
+            downloads_dir = ""
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "选择店透视下载的全部图片ZIP（可多选）",
+            downloads_dir,
+            "ZIP 文件 (*.zip);;所有文件 (*.*)",
+        )
+        if not files:
+            return
+
+        summary = {
+            "total": 0,
+            "imported": 0,
+            "overwritten": 0,
+            "skipped": 0,
+            "failed": 0,
+            "deleted_images": 0,
+        }
+        report_paths = []
+        failed_files = []
+        backup_done = False
+
+        try:
+            for file in files:
+                report_name = re.sub(r'[<>:"/\\\\|?*]+', "_", Path(file).stem).strip() or "ZIP"
+                report_path_hint = os.path.join(
+                    get_output_dir(),
+                    f"店透视SKU图片导入报告_{report_name}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.xlsx",
+                )
+                args = self._sku_image_tool_args(
+                    input=file,
+                    category=category,
+                    report=report_path_hint,
+                    dry_run=False,
+                    no_backup=backup_done,
+                )
+                try:
+                    counters, report_path = import_diantoushi_zip_file(args)
+                except Exception as exc:
+                    failed_files.append(f"{Path(file).name}：{exc}")
+                    continue
+
+                if counters.get("backup"):
+                    backup_done = True
+                report_paths.append(str(report_path))
+                for key in summary:
+                    summary[key] += int(counters.get(key, 0) or 0)
+
+            if report_paths:
+                self.reload_data()
+            elif failed_files:
+                show_error(self, "导入店透视ZIP失败", "\n".join(failed_files[:8]))
+                return
+
+            failed_zip_text = ""
+            if failed_files:
+                failed_zip_text = "\n\n失败ZIP：\n" + "\n".join(failed_files[:8])
+                if len(failed_files) > 8:
+                    failed_zip_text += f"\n... 另有 {len(failed_files) - 8} 个失败"
+            message = (
+                f"鞋款：{category}\n"
+                f"ZIP数量：{len(files)}\n"
+                f"成功ZIP：{len(report_paths)}\n"
+                f"失败ZIP：{len(failed_files)}\n\n"
+                f"SKU图片：{summary['total']}\n"
+                f"已导入：{summary['imported']}\n"
+                f"已覆盖：{summary.get('overwritten', 0)}\n"
+                f"跳过：{summary['skipped']}\n"
+                f"失败：{summary['failed']}\n\n"
+                f"清理无关系图片：{summary.get('deleted_images', 0)}\n\n"
+                f"报告目录：{os.path.dirname(report_paths[0]) if report_paths else get_output_dir()}"
+                f"{failed_zip_text}"
+            )
+            show_info(self, "店透视ZIP批量导入完成", message)
+            open_file_or_folder(os.path.dirname(report_paths[0]) if report_paths else get_output_dir())
+        except Exception as exc:
+            show_error(self, "导入店透视ZIP失败", exc)
 
     def create_missing_image_report(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -1959,6 +2062,7 @@ class AdminWindow(QMainWindow):
             self.render_images()
             self.current_image = (category, spec)
             self.pending_image_path = ""
+            cleanup_unused_image_files()
             image_file = saved.get("image_file", "")
             self.img_category.setText(category)
             self.img_spec.setText(spec)
@@ -1978,6 +2082,7 @@ class AdminWindow(QMainWindow):
         if not category or not spec:
             return
         if delete_image_binding(category, spec):
+            cleanup_unused_image_files()
             self.refresh_image_categories()
             self.render_images()
             self.clear_image_form()
@@ -2004,6 +2109,23 @@ class AdminWindow(QMainWindow):
                 show_info(self, "没有可备份数据", "当前主数据文件不存在。")
         except Exception as exc:
             show_error(self, "备份失败", exc)
+
+    def cleanup_unused_images(self):
+        try:
+            stats = cleanup_unused_image_files()
+            self.refresh_image_categories()
+            self.render_images()
+            self.render_dashboard()
+            show_info(
+                self,
+                "清理完成",
+                f"扫描图片：{stats.get('total', 0)}\n"
+                f"保留图片：{stats.get('kept', 0)}\n"
+                f"删除无关系图片：{stats.get('deleted', 0)}\n"
+                f"释放空间：{stats.get('freed_bytes', 0)} 字节",
+            )
+        except Exception as exc:
+            show_error(self, "清理无关系图片失败", exc)
 
     def render_settings(self):
         self.settings_box.setPlainText(

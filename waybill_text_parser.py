@@ -7,6 +7,7 @@ OUTPUT_FIELDS = ["店铺名", "店铺关键词", "面单模式", "商品简称",
 
 MODE_SHOP_CODE = "店铺码模式"
 MODE_TITLE = "标题模式"
+MODE_DIRECT_SHOP_PRINT = "店铺直接打单模式"
 MODE_UNKNOWN = "未知模式"
 
 SIZE_TOKEN_RE = r"(?:3[5-9]|4[0-9]|5[0-2])(?:\.5)?"
@@ -22,6 +23,19 @@ SPEC_TRAILING_NOISE_RE = re.compile(
 
 TRACKING_NOISE_RE = re.compile(
     r"(?:运单号|快递单号|物流单号|订单号|业务机|打印机)\s*[:：=]?\s*(?:\[[^\]]*\]|【[^】]*】|[^,，;；\n]*)",
+    flags=re.I,
+)
+KEY_VALUE_LINE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*\s*[:：]")
+ITEM_INFO_LINE_RE = re.compile(r"^ITEM_INFO\s*[:：]\s*(?P<value>.*)$", flags=re.I)
+ITEM_INFO_ITEM_RE = re.compile(
+    rf"(?P<title>.+?)(?:[;；,\n]\s*|\s+)(?P<size>{SIZE_TOKEN_RE})\s*"
+    r"(?:[【\[\(（]\s*(?P<qty_bracket>\d+)\s*(?:件|双)?\s*[】\]\)）]|"
+    r"[*xX]\s*(?P<qty_x>\d+)|"
+    r"(?P<qty_plain>\d+)\s*(?:件|双)?)",
+    flags=re.I | re.S,
+)
+ITEM_INFO_SPEC_TAIL_RE = re.compile(
+    r"(?P<shoe>[A-Za-z]*\d+(?:\.\d+)?)\s*(?P<spec>[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9/_ -]*)$",
     flags=re.I,
 )
 
@@ -577,7 +591,7 @@ def parse_title_quantity_segment(segment: str, rule_config: object | None = None
 def parse_spec_stuck_title_segment(segment: str, rule_config: object | None = None) -> dict | None:
     text = clean_cell(strip_tracking_noise(segment))
     match = re.search(
-        rf"^(?P<spec>.+?)\s*,\s*(?P<size>{SIZE_TOKEN_RE})(?P<title>.+?)\s*[*xX]\s*(?P<qty>\d+)\s*$",
+        rf"^(?P<spec>.+?)\s*,\s*(?P<size>{SIZE_TOKEN_RE})(?!\.5\s*[*xX])(?P<title>.+?)\s*[*xX]\s*(?P<qty>\d+)\s*$",
         text,
         flags=re.I,
     )
@@ -638,6 +652,71 @@ def parse_spec_size_title_pairs(text: str, rule_config: object | None = None) ->
             }
         )
         index += 2
+    return rows
+
+
+def item_info_blocks(text: str) -> list[str]:
+    lines = [clean_cell(line) for line in normalize_raw_text(text).splitlines() if clean_cell(line)]
+    blocks = []
+    current: list[str] | None = None
+    for line in lines:
+        match = ITEM_INFO_LINE_RE.match(line)
+        if match:
+            if current:
+                blocks.append("\n".join(current))
+            current = [match.group("value")]
+            continue
+
+        if current is None:
+            continue
+        if KEY_VALUE_LINE_RE.match(line):
+            blocks.append("\n".join(current))
+            current = None
+            continue
+        current.append(line)
+
+    if current:
+        blocks.append("\n".join(current))
+    return [block for block in blocks if clean_cell(block)]
+
+
+def split_item_info_title(title: object, rule_config: object | None = None) -> tuple[str, str]:
+    text = clean_cell(title)
+    shoe, spec = split_title_shoe_and_spec(text, rule_config)
+
+    tail_match = ITEM_INFO_SPEC_TAIL_RE.search(text)
+    fallback_shoe = clean_cell(tail_match.group("shoe")) if tail_match else ""
+    fallback_spec = clean_spec(tail_match.group("spec")) if tail_match else ""
+    if fallback_spec and (not spec or len(spec) > max(12, len(fallback_spec) + 6) or fallback_spec in spec):
+        spec = fallback_spec
+    if not shoe and fallback_shoe:
+        shoe = fallback_shoe
+    if not spec:
+        spec = clean_spec(text)
+    return clean_cell(shoe), clean_spec(spec)
+
+
+def parse_item_info_groups(text: str, rule_config: object | None = None) -> list[dict]:
+    rows = []
+    for block in item_info_blocks(text):
+        for match in ITEM_INFO_ITEM_RE.finditer(block):
+            title = clean_cell(match.group("title"))
+            size = normalize_size(match.group("size"))
+            if not title or not size:
+                continue
+            qty = match.group("qty_bracket") or match.group("qty_x") or match.group("qty_plain") or 1
+            shoe, spec = split_item_info_title(title, rule_config)
+            rows.append(
+                {
+                    "店铺名": "",
+                    "店铺关键词": "",
+                    "面单模式": MODE_DIRECT_SHOP_PRINT,
+                    "商品简称": shoe,
+                    "规格": spec,
+                    "尺码": size,
+                    "数量": normalize_qty(qty),
+                }
+            )
     return rows
 
 
@@ -726,6 +805,11 @@ def parse_waybill_raw_text(raw_text: object, remark_text: object = "", rule_conf
     seen = set()
     context_shop = ""
     context_keyword = ""
+
+    for parsed in parse_item_info_groups(raw, rule_config):
+        if not is_complete_waybill_row(parsed):
+            continue
+        add_output_row(rows, seen, parsed, remark)
 
     for parsed in parse_labeled_item_groups(raw, rule_config):
         if not is_complete_waybill_row(parsed):

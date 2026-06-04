@@ -7,6 +7,9 @@ __pycache__/
 build/
 dist/
 *.spec
+collector_client_legacy/build_v*/
+collector_client_legacy/dist_v*/
+collector_client_legacy/spec_v*/
 
 # Runtime data
 data/
