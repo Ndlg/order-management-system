@@ -16,7 +16,7 @@ from waybill_raw_contract import (
     is_raw_waybill_template_name,
     raw_waybill_text_column,
 )
-from waybill_text_parser import normalize_raw_text, parse_waybill_raw_text
+from waybill_text_parser import PARSE_STATUS_FIELD, normalize_raw_text, parse_waybill_raw_text
 
 
 NO_PRINT_TEXT_STATUS = "无打印信息"
@@ -66,7 +66,7 @@ def parse_raw_waybill_dataframe(
             continue
 
         for parsed in parsed_rows:
-            rows.append(_raw_parse_row(raw_text, parsed, "已解析", row))
+            rows.append(_raw_parse_row(raw_text, parsed, parsed.get(PARSE_STATUS_FIELD) or "已解析", row))
 
     return rows
 
@@ -94,7 +94,7 @@ def parse_raw_waybill_records(records: list[dict], rule_config: object | None = 
             continue
 
         for parsed in parsed_rows:
-            rows.append(_raw_parse_row(raw_text, parsed, "已解析", record))
+            rows.append(_raw_parse_row(raw_text, parsed, parsed.get(PARSE_STATUS_FIELD) or "已解析", record))
     return rows
 
 

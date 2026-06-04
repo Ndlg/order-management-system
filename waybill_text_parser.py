@@ -4,6 +4,7 @@ import re
 
 
 OUTPUT_FIELDS = ["店铺名", "店铺关键词", "面单模式", "商品简称", "规格", "尺码", "数量", "备注"]
+PARSE_STATUS_FIELD = "_parse_status"
 
 MODE_SHOP_CODE = "店铺码模式"
 MODE_TITLE = "标题模式"
@@ -191,6 +192,13 @@ def clean_spec(value: object) -> str:
     for label in (*SPEC_LABELS, *SIZE_LABELS):
         text = re.sub(rf"^{re.escape(label)}\s*[:：=]\s*", "", text, flags=re.I).strip()
     text = re.sub(r"^\d+\.\d+\s*", "", text).strip()
+    return "" if text in WEAK_SPEC_VALUES else text
+
+
+def clean_item_info_spec(value: object) -> str:
+    text = clean_cell(value)
+    for label in (*SPEC_LABELS, *SIZE_LABELS):
+        text = re.sub(rf"^{re.escape(label)}\s*[:：=]\s*", "", text, flags=re.I).strip()
     return "" if text in WEAK_SPEC_VALUES else text
 
 
@@ -684,16 +692,22 @@ def split_item_info_title(title: object, rule_config: object | None = None) -> t
     text = clean_cell(title)
     shoe, spec = split_title_shoe_and_spec(text, rule_config)
 
+    spaced_parts = [part for part in re.split(r"\s+", text) if clean_cell(part)]
     tail_match = ITEM_INFO_SPEC_TAIL_RE.search(text)
-    fallback_shoe = clean_cell(tail_match.group("shoe")) if tail_match else ""
-    fallback_spec = clean_spec(tail_match.group("spec")) if tail_match else ""
-    if fallback_spec and (not spec or len(spec) > max(12, len(fallback_spec) + 6) or fallback_spec in spec):
-        spec = fallback_spec
-    if not shoe and fallback_shoe:
-        shoe = fallback_shoe
-    if not spec:
-        spec = clean_spec(text)
-    return clean_cell(shoe), clean_spec(spec)
+    fallback_spec = ""
+    if len(spaced_parts) > 1:
+        fallback_spec = clean_item_info_spec(spaced_parts[-1])
+    elif tail_match:
+        fallback_spec = clean_cell(tail_match.group(0))
+
+    if shoe:
+        if fallback_spec and (not spec or len(spec) > max(12, len(fallback_spec) + 6) or fallback_spec in spec):
+            spec = fallback_spec
+        if not spec:
+            spec = clean_spec(text)
+    else:
+        spec = fallback_spec or clean_item_info_spec(text)
+    return clean_cell(shoe), clean_item_info_spec(spec)
 
 
 def parse_item_info_groups(text: str, rule_config: object | None = None) -> list[dict]:
@@ -706,6 +720,7 @@ def parse_item_info_groups(text: str, rule_config: object | None = None) -> list
                 continue
             qty = match.group("qty_bracket") or match.group("qty_x") or match.group("qty_plain") or 1
             shoe, spec = split_item_info_title(title, rule_config)
+            parse_status = "已解析" if shoe else "缺少鞋款规则"
             rows.append(
                 {
                     "店铺名": "",
@@ -715,6 +730,7 @@ def parse_item_info_groups(text: str, rule_config: object | None = None) -> list
                     "规格": spec,
                     "尺码": size,
                     "数量": normalize_qty(qty),
+                    PARSE_STATUS_FIELD: parse_status,
                 }
             )
     return rows
@@ -746,7 +762,10 @@ def is_complete_waybill_row(row: dict) -> bool:
 def output_row(parsed: dict, remark: str) -> dict:
     values = dict(parsed)
     values["备注"] = remark
-    return {field: values.get(field, "") for field in OUTPUT_FIELDS}
+    row = {field: values.get(field, "") for field in OUTPUT_FIELDS}
+    if values.get(PARSE_STATUS_FIELD):
+        row[PARSE_STATUS_FIELD] = values.get(PARSE_STATUS_FIELD)
+    return row
 
 
 def row_key(row: dict) -> tuple[str, ...]:
