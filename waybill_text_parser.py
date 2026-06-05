@@ -334,6 +334,25 @@ def clean_remark(value: object) -> str:
     return "；".join(parts)
 
 
+def has_title_marker(value: object) -> bool:
+    return bool(re.search(r"[【\[].+?[】\]]", clean_cell(value)))
+
+
+def remove_leading_qty_marker(value: object) -> tuple[str, int]:
+    text = clean_cell(value)
+    match = re.match(r"^[*xX]\s*(?P<qty>\d+)\s*(?P<rest>.+)$", text)
+    if match:
+        return clean_cell(match.group("rest")), normalize_qty(match.group("qty"))
+    return text, 1
+
+
+def looks_like_title_labeled_text(value: object) -> bool:
+    text = clean_cell(value)
+    if not has_title_marker(text):
+        return False
+    return bool(label_value(text, SPEC_LABELS) or label_value(text, SIZE_LABELS))
+
+
 def split_known_prefix(body: str) -> tuple[str, str]:
     text = clean_cell(body)
     for prefix in KNOWN_PREFIXES:
@@ -408,6 +427,8 @@ def parse_labeled_item_groups(text: str, rule_config: object | None = None) -> l
         item = clean_cell(line)
         if not item:
             continue
+        if looks_like_title_labeled_text(item):
+            continue
 
         shop, remainder = split_shop_name(item)
         if shop:
@@ -434,6 +455,55 @@ def parse_labeled_item_groups(text: str, rule_config: object | None = None) -> l
             pending_spec = candidate
 
     return rows
+
+
+def parse_title_labeled_segment(segment: str, rule_config: object | None = None) -> dict | None:
+    text = strip_tracking_noise(segment)
+    if not looks_like_title_labeled_text(text):
+        return None
+
+    match = re.match(r"^(?P<title>.+?)[,，]\s*(?P<attrs>.+)$", text, flags=re.S)
+    if not match:
+        return None
+
+    title = clean_cell(match.group("title"))
+    attrs = normalize_raw_text(match.group("attrs")).replace("\n", ",")
+    spec = ""
+    size = ""
+    qty = 1
+    for token in [clean_cell(item) for item in attrs.split(",") if clean_cell(item)]:
+        token, token_qty = remove_leading_qty_marker(token)
+        if token_qty != 1:
+            qty = token_qty
+
+        spec_value = label_value(token, SPEC_LABELS)
+        if spec_value:
+            spec = clean_spec(spec_value[1])
+            continue
+
+        size_value = label_value(token, SIZE_LABELS)
+        if size_value:
+            size = normalize_size(size_value[1])
+
+    if not spec or not size:
+        return None
+
+    shoe, _title_spec = split_title_shoe_and_spec(title, rule_config)
+    return {
+        "店铺名": "",
+        "店铺关键词": "",
+        "面单模式": MODE_TITLE,
+        "商品简称": shoe,
+        "规格": spec,
+        "尺码": size,
+        "数量": normalize_qty(qty),
+        PARSE_STATUS_FIELD: "已解析" if shoe else "缺少鞋款规则",
+    }
+
+
+def parse_title_labeled_groups(text: str, rule_config: object | None = None) -> list[dict]:
+    row = parse_title_labeled_segment(text, rule_config)
+    return [row] if row else []
 
 
 def split_glued_items(text: str) -> list[str]:
@@ -745,7 +815,9 @@ def parse_item_info_groups(text: str, rule_config: object | None = None) -> list
 
 def parse_segment(segment: str, rule_config: object | None = None) -> dict:
     text = strip_tracking_noise(segment)
-    row = parse_labeled_size(text, rule_config)
+    row = parse_title_labeled_segment(text, rule_config)
+    if row is None:
+        row = parse_labeled_size(text, rule_config)
     if row is None:
         row = parse_title_quantity_segment(text, rule_config)
     if row is None:
@@ -833,6 +905,11 @@ def parse_waybill_raw_text(raw_text: object, remark_text: object = "", rule_conf
     context_keyword = ""
 
     for parsed in parse_item_info_groups(raw, rule_config):
+        if not is_complete_waybill_row(parsed):
+            continue
+        add_output_row(rows, seen, parsed, remark)
+
+    for parsed in parse_title_labeled_groups(raw, rule_config):
         if not is_complete_waybill_row(parsed):
             continue
         add_output_row(rows, seen, parsed, remark)
