@@ -28,11 +28,12 @@ TRACKING_NOISE_RE = re.compile(
 )
 KEY_VALUE_LINE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*\s*[:：]")
 ITEM_INFO_LINE_RE = re.compile(r"^ITEM_INFO\s*[:：]\s*(?P<value>.*)$", flags=re.I)
+ITEM_TOTAL_COUNT_RE = re.compile(r"(?:^|\n)ITEM_TOTAL_COUNT\s*[:：]\s*(?P<qty>\d+)", flags=re.I)
 ITEM_INFO_ITEM_RE = re.compile(
     rf"(?P<title>.+?)(?:[;；,\n]\s*|\s+)(?P<size>{SIZE_TOKEN_RE})\s*"
-    r"(?:[【\[\(（]\s*(?P<qty_bracket>\d+)\s*(?:件|双)?\s*[】\]\)）]|"
-    r"[*xX]\s*(?P<qty_x>\d+)|"
-    r"(?P<qty_plain>\d+)\s*(?:件|双)?)",
+    r"(?:(?:[【\[\(（]\s*(?P<qty_bracket>\d+)\s*(?:件|双)?\s*[】\]\)）])|"
+    r"(?:[*xX]\s*(?P<qty_x>\d+))|"
+    r"(?:(?P<qty_plain>\d+)\s*(?:件|双)?))?",
     flags=re.I | re.S,
 )
 ITEM_INFO_SPEC_TAIL_RE = re.compile(
@@ -688,6 +689,11 @@ def item_info_blocks(text: str) -> list[str]:
     return [block for block in blocks if clean_cell(block)]
 
 
+def item_total_count(text: str) -> int:
+    match = ITEM_TOTAL_COUNT_RE.search(normalize_raw_text(text))
+    return normalize_qty(match.group("qty") if match else 1)
+
+
 def split_item_info_title(title: object, rule_config: object | None = None) -> tuple[str, str]:
     text = clean_cell(title)
     shoe, spec = split_title_shoe_and_spec(text, rule_config)
@@ -712,13 +718,14 @@ def split_item_info_title(title: object, rule_config: object | None = None) -> t
 
 def parse_item_info_groups(text: str, rule_config: object | None = None) -> list[dict]:
     rows = []
+    default_qty = item_total_count(text)
     for block in item_info_blocks(text):
         for match in ITEM_INFO_ITEM_RE.finditer(block):
             title = clean_cell(match.group("title"))
             size = normalize_size(match.group("size"))
             if not title or not size:
                 continue
-            qty = match.group("qty_bracket") or match.group("qty_x") or match.group("qty_plain") or 1
+            qty = match.group("qty_bracket") or match.group("qty_x") or match.group("qty_plain") or default_qty
             shoe, spec = split_item_info_title(title, rule_config)
             parse_status = "已解析" if shoe else "缺少鞋款规则"
             rows.append(
