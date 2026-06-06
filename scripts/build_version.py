@@ -1,0 +1,194 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+import zipfile
+from datetime import datetime
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = PROJECT_ROOT / "src"
+DATA_ROOT = PROJECT_ROOT / "data"
+DOCS_ROOT = PROJECT_ROOT / "docs"
+TMP_ROOT = PROJECT_ROOT / "tmp"
+VERSIONS_ROOT = PROJECT_ROOT / "versions"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate a version directory for OrderSystem.")
+    parser.add_argument("version", help="Version number, for example 7.5.1 or v7.5.1.")
+    parser.add_argument("--skip-git-pull", action="store_true", help="Skip git pull before building.")
+    parser.add_argument("--build-exe", action="store_true", help="Run PyInstaller and copy exe files into bin/.")
+    parser.add_argument("--keep-tmp", action="store_true", help="Keep tmp/build_version after the build.")
+    return parser.parse_args()
+
+
+def normalize_version(raw: str) -> str:
+    version = raw.strip().lstrip("vV")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise SystemExit("版本号必须遵循 主版本.次版本.修订号，例如 7.5.1")
+    return f"v{version}"
+
+
+def ensure_layout(version_dir: Path) -> None:
+    for path in (
+        SRC_ROOT,
+        DATA_ROOT / "input",
+        DATA_ROOT / "reference",
+        DATA_ROOT / "output",
+        DOCS_ROOT,
+        TMP_ROOT,
+        version_dir / "bin",
+        version_dir / "logs",
+        version_dir / "tests",
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+
+
+def find_git() -> str | None:
+    found = shutil.which("git")
+    if found:
+        return found
+    for candidate in (
+        Path("C:/Program Files/Git/cmd/git.exe"),
+        Path("C:/Program Files/Git/bin/git.exe"),
+    ):
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def run_command(args: list[str], log_file: Path, cwd: Path = PROJECT_ROOT, env: dict[str, str] | None = None) -> int:
+    with log_file.open("a", encoding="utf-8") as log:
+        log.write(f"\n$ {' '.join(args)}\n")
+        proc = subprocess.run(args, cwd=cwd, env=env, text=True, stdout=log, stderr=subprocess.STDOUT, check=False)
+        log.write(f"exit_code={proc.returncode}\n")
+        return proc.returncode
+
+
+def pull_latest_source(skip: bool, log_file: Path) -> str:
+    if skip:
+        return "skipped"
+    git = find_git()
+    if not git:
+        with log_file.open("a", encoding="utf-8") as log:
+            log.write("git executable not found; skipped pull.\n")
+        return "git-not-found"
+    code = run_command([git, "pull", "--ff-only"], log_file)
+    return "ok" if code == 0 else f"failed:{code}"
+
+
+def copy_tree(source: Path, target: Path) -> None:
+    if target.exists():
+        shutil.rmtree(target)
+    if source.exists():
+        shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    else:
+        target.mkdir(parents=True, exist_ok=True)
+
+
+def copy_test_data(version_dir: Path) -> None:
+    copy_tree(DATA_ROOT / "input", version_dir / "tests" / "input")
+    copy_tree(DATA_ROOT / "reference", version_dir / "tests" / "reference")
+
+
+def run_regression_tests(version_dir: Path, log_file: Path) -> int:
+    report = version_dir / "tests" / "report.log"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(SRC_ROOT)
+    env["ORDER_SORTER_DATA_DIR"] = str(version_dir / "tests" / "reference")
+    env["ORDER_SORTER_OUTPUT_DIR"] = str(version_dir / "tests" / "output")
+    env["ORDER_SORTER_TEMP_DIR"] = str(version_dir / "tests" / "tmp")
+    report.write_text(f"Regression started: {datetime.now():%Y-%m-%d %H:%M:%S}\n", encoding="utf-8")
+    code = run_command(
+        [sys.executable, "-m", "unittest", "discover", "-s", str(SRC_ROOT / "tests"), "-p", "test_*.py"],
+        report,
+        env=env,
+    )
+    shutil.rmtree(version_dir / "tests" / "tmp", ignore_errors=True)
+    with log_file.open("a", encoding="utf-8") as log:
+        log.write(f"regression_tests={code}\n")
+    return code
+
+
+def create_source_package(version: str, version_dir: Path) -> Path:
+    artifact = version_dir / "bin" / f"OrderSystem_{version}.zip"
+    if artifact.exists():
+        artifact.unlink()
+    include_roots = (SRC_ROOT, PROJECT_ROOT / "scripts", DOCS_ROOT)
+    with zipfile.ZipFile(artifact, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for root in include_roots:
+            if not root.exists():
+                continue
+            for path in root.rglob("*"):
+                if path.is_dir() or "__pycache__" in path.parts:
+                    continue
+                zf.write(path, path.relative_to(PROJECT_ROOT))
+        requirements = PROJECT_ROOT / "requirements.txt"
+        if requirements.exists():
+            zf.write(requirements, requirements.relative_to(PROJECT_ROOT))
+    return artifact
+
+
+def build_executables(version_dir: Path, log_file: Path) -> list[Path]:
+    code = run_command([sys.executable, str(PROJECT_ROOT / "scripts" / "build_qt_windows.py")], log_file)
+    if code != 0:
+        raise SystemExit(f"PyInstaller build failed. See log: {log_file}")
+    copied: list[Path] = []
+    for exe in (TMP_ROOT / "build").rglob("*.exe"):
+        target = version_dir / "bin" / exe.name
+        shutil.copy2(exe, target)
+        copied.append(target)
+    return copied
+
+
+def append_version_log(version: str, version_dir: Path, git_status: str, test_code: int, artifacts: list[Path]) -> None:
+    path = DOCS_ROOT / "version_log.md"
+    if not path.exists():
+        path.write_text("# 版本记录\n\n", encoding="utf-8")
+    artifact_names = ", ".join(item.name for item in artifacts) if artifacts else "none"
+    entry = (
+        f"## {version} - {datetime.now():%Y-%m-%d %H:%M:%S}\n"
+        f"- 目录: `{version_dir.as_posix()}`\n"
+        f"- 拉取源码: {git_status}\n"
+        f"- 回归测试: {'通过' if test_code == 0 else '失败'} ({test_code})\n"
+        f"- 产物: {artifact_names}\n\n"
+    )
+    with path.open("a", encoding="utf-8") as log:
+        log.write(entry)
+
+
+def cleanup_tmp(keep_tmp: bool) -> None:
+    build_tmp = TMP_ROOT / "build_version"
+    build_tmp.mkdir(parents=True, exist_ok=True)
+    if not keep_tmp:
+        shutil.rmtree(build_tmp)
+
+
+def main() -> int:
+    args = parse_args()
+    version = normalize_version(args.version)
+    version_dir = VERSIONS_ROOT / version
+    ensure_layout(version_dir)
+    log_file = version_dir / "logs" / f"{datetime.now():%Y%m%d_%H%M%S}.log"
+    git_status = pull_latest_source(args.skip_git_pull, log_file)
+    copy_test_data(version_dir)
+    test_code = run_regression_tests(version_dir, log_file)
+    artifacts = [create_source_package(version, version_dir)]
+    if args.build_exe:
+        artifacts.extend(build_executables(version_dir, log_file))
+    append_version_log(version, version_dir, git_status, test_code, artifacts)
+    cleanup_tmp(args.keep_tmp)
+    print(f"version_dir={version_dir}")
+    print(f"test_report={version_dir / 'tests' / 'report.log'}")
+    return test_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

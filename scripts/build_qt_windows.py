@@ -7,11 +7,17 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = PROJECT_ROOT / "src"
+SCRIPT_ROOT = Path(__file__).resolve().parent
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
 from app_info import build_slug
 
 
-ROOT = Path(__file__).resolve().parent
-BUILD_ROOT = ROOT.parent / "build"
+ROOT = SRC_ROOT
+BUILD_ROOT = PROJECT_ROOT / "tmp" / "build"
 BUILD_STAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 BUILD_SLUG = os.environ.get("ORDER_SORTER_BUILD_SLUG", build_slug())
 DIST = BUILD_ROOT / f"dist_qt_{BUILD_SLUG}_{BUILD_STAMP}"
@@ -21,7 +27,7 @@ SPEC = BUILD_ROOT / f"spec_qt_{BUILD_SLUG}_{BUILD_STAMP}"
 
 def ensure_inside_root(path):
     path = Path(path).resolve()
-    allowed_roots = (ROOT.resolve(), BUILD_ROOT.resolve())
+    allowed_roots = (ROOT.resolve(), SCRIPT_ROOT.resolve(), BUILD_ROOT.resolve())
     if not any(root == path or root in path.parents for root in allowed_roots):
         raise RuntimeError(f"refuse to remove path outside source/build root: {path}")
     return path
@@ -69,7 +75,7 @@ def clean():
 def run_pyinstaller(args):
     common = [
         sys.executable,
-        str(ROOT / "pyinstaller_no_checksum.py"),
+        str(SCRIPT_ROOT / "pyinstaller_no_checksum.py"),
         "--noconfirm",
         "--clean",
         "-F",
@@ -80,6 +86,8 @@ def run_pyinstaller(args):
         str(BUILD),
         "--specpath",
         str(SPEC),
+        "--paths",
+        str(ROOT),
         "--hidden-import",
         "PySide6.QtCore",
         "--hidden-import",

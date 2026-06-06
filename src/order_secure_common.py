@@ -39,6 +39,8 @@ TEMPLATE_FILE_NAME = "import_templates.json"
 DATA_SCHEMA_VERSION = "7.5.1-lite"
 DEV_WORKSPACE_DIR_NAME = "_实验开发区"
 DATA_DIR_OVERRIDE_ENV = "ORDER_SORTER_DATA_DIR"
+OUTPUT_DIR_OVERRIDE_ENV = "ORDER_SORTER_OUTPUT_DIR"
+TEMP_DIR_OVERRIDE_ENV = "ORDER_SORTER_TEMP_DIR"
 
 
 def get_base_dir():
@@ -66,12 +68,27 @@ def _shared_project_output_dir(base_dir):
     return None
 
 
+def _source_project_root(base_dir):
+    current = Path(base_dir).resolve()
+    for folder in (current, *current.parents):
+        if folder.name == "src" and (folder.parent / "data").exists():
+            return folder.parent
+        if (folder / "src").exists() and (folder / "data").exists():
+            return folder
+    return None
+
+
 def get_data_dir():
     override = os.environ.get(DATA_DIR_OVERRIDE_ENV, "").strip()
     if override:
         path = os.path.abspath(os.path.expanduser(override))
     else:
-        path = _shared_project_data_dir(get_base_dir()) or os.path.join(get_base_dir(), DATA_DIR_NAME)
+        project_root = _source_project_root(get_base_dir())
+        path = (
+            _shared_project_data_dir(get_base_dir())
+            or (str(project_root / DATA_DIR_NAME) if project_root else None)
+            or os.path.join(get_base_dir(), DATA_DIR_NAME)
+        )
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -85,13 +102,27 @@ def get_template_file():
 
 
 def get_output_dir():
-    path = _shared_project_output_dir(get_base_dir()) or os.path.join(get_base_dir(), "output")
+    override = os.environ.get(OUTPUT_DIR_OVERRIDE_ENV, "").strip()
+    if override:
+        path = os.path.abspath(os.path.expanduser(override))
+    else:
+        project_root = _source_project_root(get_base_dir())
+        path = (
+            _shared_project_output_dir(get_base_dir())
+            or (str(project_root / "data" / "output") if project_root else None)
+            or os.path.join(get_base_dir(), "output")
+        )
     os.makedirs(path, exist_ok=True)
     return path
 
 
 def get_temp_dir():
-    path = os.path.join(get_base_dir(), "temp")
+    override = os.environ.get(TEMP_DIR_OVERRIDE_ENV, "").strip()
+    if override:
+        path = os.path.abspath(os.path.expanduser(override))
+    else:
+        project_root = _source_project_root(get_base_dir())
+        path = str(project_root / "tmp") if project_root else os.path.join(get_base_dir(), "temp")
     os.makedirs(path, exist_ok=True)
     return path
 

@@ -6,18 +6,28 @@ __pycache__/
 # Build outputs
 build/
 dist/
+tmp/*
+!tmp/.gitkeep
 *.spec
-collector_client_legacy/build_v*/
-collector_client_legacy/dist_v*/
-collector_client_legacy/spec_v*/
+scripts/collector_client_legacy/build_v*/
+scripts/collector_client_legacy/dist_v*/
+scripts/collector_client_legacy/spec_v*/
 
 # Runtime data
-data/
-output/
-temp/
+data/*.enc
+data/import_templates.json
+data/input/*
+!data/input/.gitkeep
+data/output/*
+!data/output/.gitkeep
+/output/
+/temp/
 uploads/
 browser_profile/
 sku_output/
+versions/v*/
+versions/old/*
+!versions/old/.gitkeep
 
 # Local workspaces and archives
 _实验开发区/
