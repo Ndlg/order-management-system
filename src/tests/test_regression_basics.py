@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import unittest
 from pathlib import Path
 
@@ -51,6 +52,24 @@ class RegressionBasicsTest(unittest.TestCase):
         self.assertEqual(misplaced_modules, [])
         for package in ("core", "ui", "utils", "tests"):
             self.assertTrue((src_root / package).is_dir(), package)
+
+    def test_code_uses_package_import_boundaries(self) -> None:
+        project_root = Path(__file__).resolve().parents[2]
+        forbidden = re.compile(
+            r"^\s*(?:from|import)\s+("
+            r"app|app_info|five_field_normalizer|order_core|order_secure_common|"
+            r"qt_app|qt_admin|qt_client|qt_web_console|shoe_rule_engine|"
+            r"sku_image_binder|waybill_[a-z_]+"
+            r")\b",
+            flags=re.MULTILINE,
+        )
+        offenders: list[str] = []
+        for folder in (project_root / "src", project_root / "scripts"):
+            for path in folder.rglob("*.py"):
+                text = path.read_text(encoding="utf-8", errors="ignore")
+                if forbidden.search(text):
+                    offenders.append(str(path.relative_to(project_root)))
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":

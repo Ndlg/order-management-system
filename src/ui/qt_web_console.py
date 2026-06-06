@@ -376,7 +376,7 @@ class WebConsoleWindow(QMainWindow):
         if not self.is_running():
             return {"status": "idle", "batch_id": "", "collectors": [], "uploaded_collectors": 0}
         try:
-            import app as web_app
+            from ui import app as web_app
 
             return web_app.waybill_status_payload()
         except Exception as exc:

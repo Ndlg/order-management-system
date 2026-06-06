@@ -1,0 +1,38 @@
+# 代码组装说明
+
+## 模块边界
+
+- `src/core/`: 订单整理核心、五要素解析、鞋款规则、面单解析、面单文件输出。
+- `src/ui/`: FastAPI Web 服务、Qt 管理端、Qt 客户端、Web 控制台、UI 模板和图标资源。
+- `src/utils/`: 版本信息、数据存储、加密兼容、图片绑定和通用路径工具。
+- `scripts/`: 构建、版本生成、旧采集器打包脚本。
+
+## 运行入口
+
+```powershell
+$env:PYTHONPATH = "$PWD/src"
+python src/ui/qt_admin.py
+python src/ui/qt_client.py
+python src/ui/qt_web_console.py
+uvicorn ui.app:app --app-dir src --host 127.0.0.1 --port 8000
+```
+
+## 构建入口
+
+```powershell
+python scripts/build_version.py 7.9.2
+python scripts/build_version.py 7.9.2 --build-exe
+```
+
+生成内容只允许进入 `versions/vX.Y.Z/`，临时文件只允许进入 `tmp/` 或版本目录。
+
+## 自动检查
+
+回归测试会检查：
+
+- 尺码数量统计。
+- 图片嵌入冒烟。
+- 面单解析空批次。
+- 输出目录遵守 `data/output/`。
+- `src/` 根目录不允许散落业务 `.py` 文件。
+- 代码不允许继续使用旧平铺导入。
