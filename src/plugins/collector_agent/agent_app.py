@@ -17,6 +17,7 @@ from .agent_auth import register_with_server
 from .agent_config import load_config, runtime_paths_public, save_config
 from .agent_models import AGENT_VERSION, OFFICIAL_NAME, PROTOCOL_VERSION
 from .agent_service import CollectorAgentService
+from .agent_single_instance import SingleInstance
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -46,43 +47,69 @@ def self_test() -> int:
     return 0 if ok else 1
 
 
+def needs_single_instance(args: argparse.Namespace) -> bool:
+    return not (args.register or args.print_config or args.check_components or args.self_test)
+
+
+def notify_already_running(silent: bool = False) -> None:
+    if silent:
+        return
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showinfo(OFFICIAL_NAME, "业务机采集助手已经在运行。")
+        root.destroy()
+    except Exception:
+        print_json({"ok": False, "error": "already_running"})
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    instance = SingleInstance()
+    if needs_single_instance(args) and not instance.acquire():
+        notify_already_running(silent=bool(args.minimized or args.run))
+        return 0
     config = load_config()
-    changed = False
-    if args.server_url:
-        config["server_url"] = args.server_url
-        changed = True
-    if args.machine_label:
-        config["machine_label"] = args.machine_label
-        changed = True
-    if changed:
-        config = save_config(config)
+    try:
+        changed = False
+        if args.server_url:
+            config["server_url"] = args.server_url
+            changed = True
+        if args.machine_label:
+            config["machine_label"] = args.machine_label
+            changed = True
+        if changed:
+            config = save_config(config)
 
-    if args.register:
-        config = register_with_server(config["server_url"], args.machine_label or config.get("machine_label", ""))
-        print_json({"ok": True, "client_id": config.get("client_id"), "machine_label": config.get("machine_label")})
-        return 0
-    if args.print_config:
-        print_json({"paths": runtime_paths_public(), "config": load_config()})
-        return 0
-    if args.check_components:
-        print_json({"ok": True, "components": agent_db_reader.component_status()})
-        return 0
-    if args.self_test:
-        return self_test()
-    service = CollectorAgentService(config)
-    if args.once:
-        print_json(service.sync_once())
-        return 0
-    if args.run:
-        service.run_forever()
-        return 0
+        if args.register:
+            config = register_with_server(config["server_url"], args.machine_label or config.get("machine_label", ""))
+            print_json({"ok": True, "client_id": config.get("client_id"), "machine_label": config.get("machine_label")})
+            return 0
+        if args.print_config:
+            print_json({"paths": runtime_paths_public(), "config": load_config()})
+            return 0
+        if args.check_components:
+            print_json({"ok": True, "components": agent_db_reader.component_status()})
+            return 0
+        if args.self_test:
+            return self_test()
+        service = CollectorAgentService(config)
+        if args.once:
+            print_json(service.sync_once())
+            return 0
+        if args.run:
+            service.run_forever()
+            return 0
 
-    from .agent_ui import run_app
+        from .agent_ui import run_app
 
-    run_app(start_minimized=args.minimized)
-    return 0
+        run_app(start_minimized=args.minimized)
+        return 0
+    finally:
+        instance.release()
 
 
 if __name__ == "__main__":

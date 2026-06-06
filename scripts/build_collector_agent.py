@@ -102,6 +102,8 @@ def copy_with_retry(source: Path, target: Path, attempts: int = 12) -> None:
     last_error: Exception | None = None
     for _ in range(attempts):
         try:
+            if target.exists():
+                target.unlink()
             shutil.copy2(source, target)
             return
         except PermissionError as exc:
@@ -113,6 +115,17 @@ def copy_with_retry(source: Path, target: Path, attempts: int = 12) -> None:
 
 def add_data_arg(source: Path, target: str) -> str:
     return f"{source}{os.pathsep}{target}"
+
+
+def refresh_shell_icons() -> None:
+    if os.name != "nt":
+        return
+    subprocess.run(
+        ["ie4uinit.exe", "-show"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
 
 
 def build_agent(version: str, keep_build: bool = False) -> Path:
@@ -161,6 +174,8 @@ def build_agent(version: str, keep_build: bool = False) -> Path:
         "--hidden-import",
         "plugins.collector_agent.agent_tray",
         "--hidden-import",
+        "plugins.collector_agent.agent_single_instance",
+        "--hidden-import",
         "pystray",
         "--hidden-import",
         "pystray._win32",
@@ -196,6 +211,7 @@ def main() -> int:
         target = target_dir / exe.name
         copy_with_retry(exe, target)
         exe = target
+        refresh_shell_icons()
     print(f"collector_agent_exe={exe}")
     return 0
 

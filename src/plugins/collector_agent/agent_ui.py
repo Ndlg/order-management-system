@@ -71,7 +71,7 @@ class AgentRuntimeController:
 
     def stop_service(self) -> None:
         self.enabled = False
-        self._publish({"server_status": "服务已停止", "current_status": "已停止", "current_task": "-", "detail": "后台心跳已暂停"})
+        self._publish({"server_status": "服务已停止", "current_status": "已停止", "current_task": "-", "detail": "后台心跳已暂停"}, force=True)
         self.wake.set()
 
     def shutdown(self) -> None:
@@ -109,6 +109,8 @@ class AgentRuntimeController:
                     self.config = register_with_server(self.config.get("server_url", ""), self.config.get("machine_label", ""))
                     self.service = CollectorAgentService(self.config)
                 except Exception as exc:
+                    if not self.enabled:
+                        continue
                     self._publish(
                         {
                             "server_status": "重连中",
@@ -123,12 +125,16 @@ class AgentRuntimeController:
                     continue
             try:
                 response = self.service.sync_once()
+                if not self.enabled:
+                    continue
                 state = state_from_response(response)
                 state["component_text"] = self.component_text()
                 state["pending_flushed"] = response.get("pending_flushed", 0)
                 self._publish(state)
                 interval = int(response.get("poll_interval_seconds") or self.config.get("poll_interval_seconds") or 2)
             except Exception as exc:
+                if not self.enabled:
+                    continue
                 if "agent_token_invalid" in str(exc) or "agent_token_required" in str(exc):
                     config = load_config()
                     config["agent_token"] = ""
@@ -152,7 +158,9 @@ class AgentRuntimeController:
         available = len([item for item in status if item.get("exists")])
         return f"正常 {available}/{total}" if total else "未检测到打印组件"
 
-    def _publish(self, state: dict[str, Any]) -> None:
+    def _publish(self, state: dict[str, Any], force: bool = False) -> None:
+        if not force and not self.enabled:
+            return
         state = {**self.last_state, **state}
         state.setdefault("last_upload_time", self.last_state.get("last_upload_time", "-"))
         state.setdefault("last_upload_count", self.last_state.get("last_upload_count", "-"))

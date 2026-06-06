@@ -6,14 +6,17 @@ import logging
 import os
 import sqlite3
 import tempfile
+import threading
 import unittest
+import uuid
 from pathlib import Path
 
 from plugins.collector_agent import agent_db_reader, agent_storage
 from plugins.collector_agent.agent_config import config_path, load_config
 from plugins.collector_agent.agent_models import AGENT_VERSION, PROTOCOL_VERSION
 from plugins.collector_agent.agent_service import CollectorAgentService
-from plugins.collector_agent.agent_ui import state_from_response
+from plugins.collector_agent.agent_single_instance import SingleInstance
+from plugins.collector_agent.agent_ui import AgentRuntimeController, state_from_response
 
 
 class RuntimeEnv:
@@ -216,6 +219,38 @@ class CollectorAgentTest(unittest.TestCase):
         self.assertEqual(state["server_status"], "已连接")
         self.assertEqual(state["current_status"], "待命")
         self.assertEqual(state["current_task"], "等待任务")
+
+    def test_stop_service_state_is_not_overwritten_by_stale_reconnect(self) -> None:
+        with RuntimeEnv():
+            states = []
+            controller = AgentRuntimeController(states.append)
+            controller.stop_service()
+            controller._publish({"server_status": "重连中", "current_status": "重连中", "current_task": "等待 Web 服务恢复"})
+            self.assertFalse(controller.enabled)
+            self.assertEqual(states[-1]["server_status"], "服务已停止")
+            self.assertEqual(states[-1]["current_status"], "已停止")
+            controller.shutdown()
+
+    def test_single_instance_lock_allows_only_one_owner(self) -> None:
+        name = f"OrderCollectorAgentTest_{uuid.uuid4().hex}"
+        first = SingleInstance(name)
+        results: list[bool] = []
+
+        def acquire_second() -> None:
+            second = SingleInstance(name)
+            try:
+                results.append(second.acquire())
+            finally:
+                second.release()
+
+        try:
+            self.assertTrue(first.acquire())
+            thread = threading.Thread(target=acquire_second)
+            thread.start()
+            thread.join(timeout=5)
+            self.assertEqual(results, [False])
+        finally:
+            first.release()
 
 
 if __name__ == "__main__":

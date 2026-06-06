@@ -56,4 +56,16 @@
 - 拉取源码: skipped
 - 回归测试: 通过 (0)
 - 产物: OrderSystem_source_v7.9.3.zip, OrderCollectorAgent_v7.9.3.exe, OrderCollectorAgent_v7.9.3.zip, release_manifest.json
-- 说明: 采集助手取消旧手工配对流程，改为上线自动注册；EXE 使用正式程序图标。
+
+## v7.9.3 - 2026-06-07 02:53:02
+- 目录: `C:/Users/ndlgx/Documents/Projects/GitHub/Ndlg/order-management-system/versions/v7.9.3`
+- 拉取源码: skipped
+- 回归测试: 通过 (0)
+- 产物: OrderSystem_source_v7.9.3.zip, OrderCollectorAgent_v7.9.3.exe, OrderCollectorAgent_v7.9.3.zip, release_manifest.json
+
+## v7.9.3 - 2026-06-07 02:55:46
+- 目录: `C:/Users/ndlgx/Documents/Projects/GitHub/Ndlg/order-management-system/versions/v7.9.3`
+- 拉取源码: skipped
+- 回归测试: 通过 (0)
+- 产物: OrderSystem_source_v7.9.3.zip, OrderCollectorAgent_v7.9.3.exe, OrderCollectorAgent_v7.9.3.zip, release_manifest.json
+- 说明: EXE 使用清晰小尺寸正式图标；限制单实例运行；修复停止服务后被残留心跳覆盖为重连中的问题。
