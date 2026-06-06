@@ -19,8 +19,8 @@ SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-import waybill_collector_reader
-from waybill_files import record_key
+from core import waybill_collector_reader
+from core.waybill_files import record_key
 
 
 DEFAULT_CONFIG = {

@@ -7,6 +7,10 @@ from datetime import datetime
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
 
+SRC_ROOT = Path(__file__).resolve().parents[1]
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
 import pandas as pd
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -35,8 +39,24 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app_info import APP_EDITION, APP_NAME, APP_VERSION, display_version
-from order_secure_common import (
+from core.waybill_raw_contract import (
+    LEGACY_WAYBILL_REMARK_FIELD,
+    RAW_PIPELINE_INTERNAL_FIELDS,
+    RAW_WAYBILL_MODE,
+    RAW_WAYBILL_TEXT_COLUMN,
+    WAYBILL_IMAGE_STATUS_FIELD,
+)
+from core.waybill_raw_pipeline import parse_raw_waybill_dataframe, write_processed_waybill_xlsx
+from core.waybill_text_parser import (
+    infer_shoe_from_shop_keyword,
+    infer_shoe_from_spec,
+    normalize_qty,
+    normalize_rule_config,
+    parse_waybill_raw_text,
+    strip_rule_shoe_prefix,
+)
+from utils.app_info import APP_EDITION, APP_NAME, APP_VERSION, display_version
+from utils.order_secure_common import (
     backup_data_file,
     cleanup_unused_image_files,
     delete_image_binding,
@@ -60,23 +80,7 @@ from order_secure_common import (
     update_image_binding,
     upsert_image_binding,
 )
-from waybill_raw_contract import (
-    LEGACY_WAYBILL_REMARK_FIELD,
-    RAW_PIPELINE_INTERNAL_FIELDS,
-    RAW_WAYBILL_MODE,
-    RAW_WAYBILL_TEXT_COLUMN,
-    WAYBILL_IMAGE_STATUS_FIELD,
-)
-from waybill_raw_pipeline import parse_raw_waybill_dataframe, write_processed_waybill_xlsx
-from waybill_text_parser import (
-    infer_shoe_from_shop_keyword,
-    infer_shoe_from_spec,
-    normalize_qty,
-    normalize_rule_config,
-    parse_waybill_raw_text,
-    strip_rule_shoe_prefix,
-)
-from qt_app.common import (
+from ui.qt_app.common import (
     card,
     configure_table,
     make_button,
@@ -90,9 +94,9 @@ from qt_app.common import (
     show_info,
     titled_panel,
 )
-from qt_app.theme import apply_app_style
-from qt_app.single_instance import SingleInstanceGuard, activate_window
-from sku_image_binder import (
+from ui.qt_app.theme import apply_app_style
+from ui.qt_app.single_instance import SingleInstanceGuard, activate_window
+from utils.sku_image_binder import (
     DEFAULT_MAX_IMAGE_MB,
     DEFAULT_TIMEOUT,
     create_template as create_sku_image_template_file,

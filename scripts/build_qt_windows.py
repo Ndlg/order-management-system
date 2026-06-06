@@ -9,11 +9,13 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
+UI_ROOT = SRC_ROOT / "ui"
+ASSET_ROOT = UI_ROOT / "assets"
 SCRIPT_ROOT = Path(__file__).resolve().parent
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from app_info import build_slug
+from utils.app_info import build_slug
 
 
 ROOT = SRC_ROOT
@@ -97,21 +99,21 @@ def run_pyinstaller(args):
         "--hidden-import",
         "PySide6.QtNetwork",
         "--hidden-import",
-        "app_info",
+        "utils.app_info",
         "--hidden-import",
-        "order_secure_common",
+        "utils.order_secure_common",
         "--hidden-import",
-        "five_field_normalizer",
+        "core.five_field_normalizer",
         "--hidden-import",
-        "waybill_files",
+        "core.waybill_files",
         "--hidden-import",
-        "waybill_raw_contract",
+        "core.waybill_raw_contract",
         "--hidden-import",
-        "waybill_raw_pipeline",
+        "core.waybill_raw_pipeline",
         "--hidden-import",
-        "waybill_text_parser",
+        "core.waybill_text_parser",
         "--hidden-import",
-        "shoe_rule_engine",
+        "core.shoe_rule_engine",
     ]
     print("RUN:", " ".join(common + args), flush=True)
     subprocess.run(common + args, cwd=ROOT, check=True)
@@ -146,12 +148,12 @@ def main():
             "--name",
             "order_admin_app",
             "--icon",
-            str(ROOT / "icon_backend.ico"),
+            str(ASSET_ROOT / "icon_backend.ico"),
             "--add-data",
-            add_data(ROOT / "icon_backend.ico"),
+            add_data(ASSET_ROOT / "icon_backend.ico", "assets"),
             "--add-data",
-            add_data(ROOT / "icon_backend.png"),
-            str(ROOT / "qt_admin.py"),
+            add_data(ASSET_ROOT / "icon_backend.png", "assets"),
+            str(UI_ROOT / "qt_admin.py"),
         ]
     )
     rename_exe("order_admin_app", "订单整理管理系统")
@@ -160,14 +162,14 @@ def main():
             "--name",
             "order_client_app",
             "--icon",
-            str(ROOT / "icon_frontend.ico"),
+            str(ASSET_ROOT / "icon_frontend.ico"),
             "--add-data",
-            add_data(ROOT / "icon_frontend.ico"),
+            add_data(ASSET_ROOT / "icon_frontend.ico", "assets"),
             "--add-data",
-            add_data(ROOT / "icon_frontend.png"),
+            add_data(ASSET_ROOT / "icon_frontend.png", "assets"),
             "--hidden-import",
-            "order_core",
-            str(ROOT / "qt_client.py"),
+            "core.order_core",
+            str(UI_ROOT / "qt_client.py"),
         ]
     )
     rename_exe("order_client_app", "一键整理订单")
@@ -176,24 +178,24 @@ def main():
             "--name",
             "order_web_console",
             "--icon",
-            str(ROOT / "icon_web.ico"),
+            str(ASSET_ROOT / "icon_web.ico"),
             "--add-data",
-            add_data(ROOT / "icon_web.ico"),
+            add_data(ASSET_ROOT / "icon_web.ico", "assets"),
             "--add-data",
-            add_data(ROOT / "icon_web.png"),
+            add_data(ASSET_ROOT / "icon_web.png", "assets"),
             "--add-data",
-            add_data(ROOT / "templates", "templates"),
+            add_data(UI_ROOT / "templates", "ui/templates"),
             "--hidden-import",
-            "app",
+            "ui.app",
             "--hidden-import",
-            "order_core",
+            "core.order_core",
             "--collect-all",
             "fastapi",
             "--collect-all",
             "starlette",
             "--collect-all",
             "uvicorn",
-            str(ROOT / "qt_web_console.py"),
+            str(UI_ROOT / "qt_web_console.py"),
         ]
     )
     rename_exe("order_web_console", "Web服务控制台")

@@ -5,6 +5,11 @@ import threading
 import time
 import webbrowser
 from datetime import datetime
+from pathlib import Path
+
+SRC_ROOT = Path(__file__).resolve().parents[1]
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
@@ -23,9 +28,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app_info import window_title
-from order_secure_common import get_data_dir, get_data_file, get_output_dir, image_storage_summary, load_data
-from qt_app.common import (
+from utils.app_info import window_title
+from utils.order_secure_common import get_data_dir, get_data_file, get_output_dir, image_storage_summary, load_data
+from ui.qt_app.common import (
     card,
     configure_table,
     make_button,
@@ -36,8 +41,8 @@ from qt_app.common import (
     show_error,
     titled_panel,
 )
-from qt_app.theme import apply_app_style
-from qt_app.single_instance import SingleInstanceGuard, activate_window
+from ui.qt_app.theme import apply_app_style
+from ui.qt_app.single_instance import SingleInstanceGuard, activate_window
 
 
 class WebConsoleWindow(QMainWindow):
@@ -264,7 +269,7 @@ class WebConsoleWindow(QMainWindow):
             return
         try:
             import uvicorn
-            from app import app as fastapi_app
+            from ui.app import app as fastapi_app
 
             config = uvicorn.Config(
                 fastapi_app,
@@ -458,7 +463,7 @@ def main():
 def service_config_self_test():
     try:
         import uvicorn
-        from app import app as fastapi_app
+        from ui.app import app as fastapi_app
 
         config = uvicorn.Config(
             fastapi_app,

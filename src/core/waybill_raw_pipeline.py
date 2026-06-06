@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import Workbook
 
-from waybill_raw_contract import (
+from core.waybill_raw_contract import (
     AUXILIARY_WAYBILL_FIELDS,
     PROCESSED_WAYBILL_FIELDS,
     RAW_PIPELINE_INTERNAL_FIELDS,
@@ -16,7 +16,7 @@ from waybill_raw_contract import (
     is_raw_waybill_template_name,
     raw_waybill_text_column,
 )
-from waybill_text_parser import PARSE_STATUS_FIELD, normalize_raw_text, parse_waybill_raw_text
+from core.waybill_text_parser import PARSE_STATUS_FIELD, normalize_raw_text, parse_waybill_raw_text
 
 
 NO_PRINT_TEXT_STATUS = "无打印信息"

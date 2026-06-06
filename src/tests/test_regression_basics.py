@@ -10,9 +10,9 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from PIL import Image as PILImage
 
-from order_core import merge_size_quantity, normalize_qty
-from order_secure_common import get_output_dir, get_temp_dir
-from waybill_raw_pipeline import parse_raw_waybill_records
+from core.order_core import merge_size_quantity, normalize_qty
+from core.waybill_raw_pipeline import parse_raw_waybill_records
+from utils.order_secure_common import get_output_dir, get_temp_dir
 
 
 class RegressionBasicsTest(unittest.TestCase):
@@ -44,6 +44,13 @@ class RegressionBasicsTest(unittest.TestCase):
         configured = os.environ.get("ORDER_SORTER_OUTPUT_DIR")
         if configured:
             self.assertEqual(Path(get_output_dir()).resolve(), Path(configured).resolve())
+
+    def test_source_root_contains_only_packages(self) -> None:
+        src_root = Path(__file__).resolve().parents[1]
+        misplaced_modules = [path.name for path in src_root.glob("*.py")]
+        self.assertEqual(misplaced_modules, [])
+        for package in ("core", "ui", "utils", "tests"):
+            self.assertTrue((src_root / package).is_dir(), package)
 
 
 if __name__ == "__main__":

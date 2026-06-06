@@ -12,7 +12,7 @@ SOURCE_ROOT = PROJECT_ROOT / "src"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-from app_info import build_slug
+from utils.app_info import build_slug
 
 BUILD_STAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 BUILD_SUFFIX = os.environ.get("ORDER_WAYBILL_BUILD_SUFFIX", "").strip()
@@ -70,11 +70,11 @@ def main():
             "--name",
             "business_waybill_service",
             "--hidden-import",
-            "waybill_collector_reader",
+            "core.waybill_collector_reader",
             "--hidden-import",
-            "waybill_files",
+            "core.waybill_files",
             "--hidden-import",
-            "order_secure_common",
+            "utils.order_secure_common",
             str(ROOT / "business_waybill_service.py"),
         ],
         cwd=ROOT,

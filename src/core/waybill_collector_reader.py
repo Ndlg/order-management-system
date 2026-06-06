@@ -9,8 +9,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 
-from order_secure_common import get_data_dir
-from waybill_files import export_records
+from utils.order_secure_common import get_data_dir
+from core.waybill_files import export_records
 
 
 DEFAULT_DBS = [

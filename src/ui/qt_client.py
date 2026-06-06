@@ -1,6 +1,11 @@
 ﻿import os
 import sys
 from datetime import datetime
+from pathlib import Path
+
+SRC_ROOT = Path(__file__).resolve().parents[1]
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -19,10 +24,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app_info import window_title
-from order_core import generate_order_file
-from order_secure_common import get_active_system, get_output_dir, load_data, load_templates_fast
-from qt_app.common import (
+from core.order_core import generate_order_file
+from utils.app_info import window_title
+from utils.order_secure_common import get_active_system, get_output_dir, load_data, load_templates_fast
+from ui.qt_app.common import (
     configure_table,
     make_button,
     open_file_or_folder,
@@ -34,9 +39,9 @@ from qt_app.common import (
     show_info,
     titled_panel,
 )
-from qt_app.theme import apply_app_style
-from qt_app.single_instance import SingleInstanceGuard, activate_window
-from qt_app.workers import TaskWorker
+from ui.qt_app.theme import apply_app_style
+from ui.qt_app.single_instance import SingleInstanceGuard, activate_window
+from ui.qt_app.workers import TaskWorker
 
 
 class ClientWindow(QMainWindow):

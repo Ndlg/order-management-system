@@ -13,14 +13,14 @@ try:
 except Exception:
     Fernet = None
 
-from waybill_raw_contract import (
+from core.waybill_raw_contract import (
     LEGACY_RAW_WAYBILL_TEMPLATE_NAMES,
     PROCESSED_WAYBILL_TEMPLATE_NAME,
     RAW_WAYBILL_MODE,
     RAW_WAYBILL_TEMPLATE_NAME,
     RAW_WAYBILL_TEXT_COLUMN,
 )
-from waybill_text_parser import default_rule_config, normalize_rule_config
+from core.waybill_text_parser import default_rule_config, normalize_rule_config
 
 
 # ==================================================

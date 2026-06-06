@@ -7,7 +7,7 @@
 1. 先生成模板：
 
 ```bat
-python sku_image_binder.py template
+python src/utils/sku_image_binder.py template
 ```
 
 模板会写到 `C:\myproject\output\SKU图片绑定模板_*.xlsx`。
@@ -23,13 +23,13 @@ python sku_image_binder.py template
 3. 先预览，不写入：
 
 ```bat
-python sku_image_binder.py import C:\myproject\output\SKU图片绑定模板_20260602_120000.xlsx --image-dir D:\店铺图片 --dry-run
+python src/utils/sku_image_binder.py import C:\myproject\output\SKU图片绑定模板_20260602_120000.xlsx --image-dir D:\店铺图片 --dry-run
 ```
 
 4. 确认报告无误后正式导入：
 
 ```bat
-python sku_image_binder.py import C:\myproject\output\SKU图片绑定模板_20260602_120000.xlsx --image-dir D:\店铺图片
+python src/utils/sku_image_binder.py import C:\myproject\output\SKU图片绑定模板_20260602_120000.xlsx --image-dir D:\店铺图片
 ```
 
 正式导入前会备份 `C:\myproject\data\image_categories`，图片会按内容哈希去重保存到 `C:\myproject\data\images`。
@@ -39,13 +39,13 @@ python sku_image_binder.py import C:\myproject\output\SKU图片绑定模板_2026
 对订单整理文件或面单识别结果生成“还没绑定图片”的 SKU 清单：
 
 ```bat
-python sku_image_binder.py missing C:\myproject\output\监控面单识别_那道蓝光.xlsx
+python src/utils/sku_image_binder.py missing C:\myproject\output\监控面单识别_那道蓝光.xlsx
 ```
 
 如果表里没有鞋款列，但整张表都属于同一个鞋款：
 
 ```bat
-python sku_image_binder.py missing D:\订单.xlsx --default-category 昂跑
+python src/utils/sku_image_binder.py missing D:\订单.xlsx --default-category 昂跑
 ```
 
 ## 边界

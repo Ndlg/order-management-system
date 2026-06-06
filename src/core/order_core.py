@@ -44,12 +44,12 @@ from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 
-from order_secure_common import (
+from utils.order_secure_common import (
     get_output_dir, get_temp_dir, normalize_text, make_image_key, base64_to_image_file,
     safe_filename, col_letter_to_index, get_data_dir, ImageMatcher, load_image_map_for_categories,
     normalize_image_match_text, normalize_match_text,
 )
-from five_field_normalizer import (
+from core.five_field_normalizer import (
     SHOE_FIELD,
     SPEC_FIELD,
     SIZE_FIELD,
@@ -59,12 +59,12 @@ from five_field_normalizer import (
     RAW_SPEC_FIELD,
     make_five_field_item,
 )
-from shoe_rule_engine import detect_category_from_rules, detect_output_shoe_from_rules
-from waybill_raw_contract import RAW_WAYBILL_TEMPLATE_NAME as WAYBILL_RAW_TEMPLATE_NAME
-from waybill_raw_contract import RAW_WAYBILL_TEXT_COLUMN as WAYBILL_RAW_TEXT_COLUMN
-from waybill_raw_contract import PROCESSED_WAYBILL_TEMPLATE_NAME
-from waybill_raw_contract import RAW_WAYBILL_MODE
-from waybill_raw_pipeline import is_waybill_raw_template, parse_raw_waybill_dataframe
+from core.shoe_rule_engine import detect_category_from_rules, detect_output_shoe_from_rules
+from core.waybill_raw_contract import RAW_WAYBILL_TEMPLATE_NAME as WAYBILL_RAW_TEMPLATE_NAME
+from core.waybill_raw_contract import RAW_WAYBILL_TEXT_COLUMN as WAYBILL_RAW_TEXT_COLUMN
+from core.waybill_raw_contract import PROCESSED_WAYBILL_TEMPLATE_NAME
+from core.waybill_raw_contract import RAW_WAYBILL_MODE
+from core.waybill_raw_pipeline import is_waybill_raw_template, parse_raw_waybill_dataframe
 
 IMAGE_WIDTH_PX = 140
 IMAGE_HEIGHT_PX = 120

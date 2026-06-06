@@ -5,7 +5,7 @@ from __future__ import annotations
 # - waybill_files for server-side file naming/export helpers.
 # - waybill_collector_reader for business-machine print database reading.
 
-from waybill_collector_reader import (  # noqa: F401
+from core.waybill_collector_reader import (  # noqa: F401
     DEFAULT_DBS,
     choose_product_text,
     collect_records,
@@ -20,7 +20,7 @@ from waybill_collector_reader import (  # noqa: F401
     iter_text_nodes,
     normalize_print_text,
 )
-from waybill_files import (  # noqa: F401
+from core.waybill_files import (  # noqa: F401
     FIELDS,
     MACHINE_NAME,
     RAW_WAYBILL_HEADERS,

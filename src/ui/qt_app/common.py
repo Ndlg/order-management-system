@@ -23,7 +23,16 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 
 def resource_path(name):
     base = Path(getattr(sys, "_MEIPASS", ROOT_DIR))
-    return base / name
+    candidates = [
+        base / name,
+        base / "assets" / name,
+        ROOT_DIR / name,
+        ROOT_DIR / "assets" / name,
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
 
 
 def set_window_icon(window, filename):

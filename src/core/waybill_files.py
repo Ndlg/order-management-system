@@ -11,8 +11,8 @@ from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from waybill_raw_contract import RAW_WAYBILL_TEXT_COLUMN, RAW_WAYBILL_TRACKING_FIELDS
-from order_secure_common import get_output_dir
+from core.waybill_raw_contract import RAW_WAYBILL_TEXT_COLUMN, RAW_WAYBILL_TRACKING_FIELDS
+from utils.order_secure_common import get_output_dir
 
 
 FIELDS = [

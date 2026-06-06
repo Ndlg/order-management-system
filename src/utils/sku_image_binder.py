@@ -23,9 +23,13 @@ from urllib.error import URLError
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
+SRC_ROOT = Path(__file__).resolve().parents[1]
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
 import pandas as pd
 
-from order_secure_common import (
+from utils.order_secure_common import (
     ImageMatcher,
     cleanup_unused_image_files,
     get_active_system,

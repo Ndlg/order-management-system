@@ -1,18 +1,25 @@
 import os
 import json
+import sys
 import time
 import traceback
 import uuid
 import zipfile
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
+
+SRC_ROOT = Path(__file__).resolve().parents[1]
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from app_info import APP_VERSION
-from order_core import generate_order_file
-from order_secure_common import (
+from core.order_core import generate_order_file
+from core.waybill_raw_pipeline import parse_raw_waybill_records, write_processed_waybill_xlsx
+from utils.app_info import APP_VERSION
+from utils.order_secure_common import (
     WAYBILL_PROCESSED_TEMPLATE_NAME,
     WAYBILL_TEMPLATE_NAME,
     get_data_dir,
@@ -22,8 +29,7 @@ from order_secure_common import (
     load_data,
     load_templates_fast,
 )
-import waybill_files
-from waybill_raw_pipeline import parse_raw_waybill_records, write_processed_waybill_xlsx
+from core import waybill_files
 
 
 app = FastAPI(title="订单整理系统 Web服务")
@@ -60,7 +66,7 @@ def debug_environment():
         "data_file": get_data_file(),
     }
     try:
-        import order_core
+        from core import order_core
 
         info["order_core_file"] = getattr(order_core, "__file__", "")
         info["order_core_has_generate_order_file"] = hasattr(order_core, "generate_order_file")
@@ -69,7 +75,7 @@ def debug_environment():
         info["order_core_import_error"] = traceback.format_exc()
 
     try:
-        import five_field_normalizer
+        from core import five_field_normalizer
 
         info["five_field_normalizer_file"] = getattr(five_field_normalizer, "__file__", "")
         info["five_fields"] = getattr(five_field_normalizer, "FIVE_FIELDS", [])
@@ -77,7 +83,7 @@ def debug_environment():
         info["five_field_normalizer_error"] = traceback.format_exc()
 
     try:
-        import order_secure_common
+        from utils import order_secure_common
 
         info["order_secure_common_file"] = getattr(order_secure_common, "__file__", "")
         info["secure_common_has_get_data_dir"] = hasattr(order_secure_common, "get_data_dir")
@@ -87,6 +93,17 @@ def debug_environment():
 
 
 def load_html(name):
+    frozen_root = getattr(sys, "_MEIPASS", "")
+    meipass = Path(frozen_root) if frozen_root else None
+    candidates = [
+        meipass / "ui" / "templates" / name if meipass else None,
+        meipass / "templates" / name if meipass else None,
+        Path(BASE_DIR) / "templates" / name,
+    ]
+    for path in candidates:
+        if path and path.exists():
+            with path.open("r", encoding="utf-8") as f:
+                return f.read()
     with open(os.path.join(BASE_DIR, "templates", name), "r", encoding="utf-8") as f:
         return f.read()
 
@@ -403,8 +420,8 @@ def api_self_check():
 @app.get("/api/debug/core-check")
 def api_debug_core_check():
     try:
-        import five_field_normalizer
-        from order_core import generate_order_file as _generate_order_file
+        from core import five_field_normalizer
+        from core.order_core import generate_order_file as _generate_order_file
 
         return {
             "ok": True,
