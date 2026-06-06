@@ -406,7 +406,7 @@
       margin-top: 4px;
     }
 
-    .collector-mode-row {
+    .collector-bind-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -417,38 +417,35 @@
       border-top: 1px solid var(--line);
     }
 
-    .collector-mode-label {
+    .collector-bind-label {
       font-size: 13px;
       font-weight: 800;
       color: var(--text);
     }
 
-    .collector-mode-switch {
+    .collector-bind-code {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      padding: 3px;
+      min-height: 34px;
+      padding: 0 10px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
+      font-weight: 800;
+      letter-spacing: 0;
     }
 
-    .collector-mode-switch button {
+    .collector-bind-row button {
       border: 0;
       border-radius: 6px;
       padding: 7px 10px;
-      background: transparent;
-      color: var(--muted);
+      background: var(--blue);
+      color: #fff;
       font-weight: 800;
       cursor: pointer;
     }
 
-    .collector-mode-switch button.active {
-      color: #fff;
-      background: var(--blue);
-    }
-
-    .collector-mode-state {
+    .collector-bind-state {
       color: var(--muted);
       font-size: 12px;
       overflow-wrap: anywhere;
@@ -744,16 +741,16 @@
               <label>监听打印机面单</label>
               <div class="monitor-box">
                 <div class="monitor-main">
-                  <div class="monitor-title">业务机同步采集本次打印信息原文</div>
+                  <div class="monitor-title">业务机采集助手同步本次打印信息原文</div>
                   <div id="waybillDetail" class="monitor-detail">读取业务机监听状态中...</div>
                   <div id="waybillCollectors" class="collector-list" aria-live="polite"></div>
-                  <div class="collector-mode-row">
-                    <span class="collector-mode-label">采集模式</span>
-                    <span class="collector-mode-switch" role="group" aria-label="采集模式">
-                      <button id="collectionModeFiltered" type="button" onclick="setCollectorMode('filtered')">筛选采集</button>
-                      <button id="collectionModeFull" type="button" onclick="setCollectorMode('full')">全量采集</button>
+                  <div class="collector-bind-row">
+                    <span class="collector-bind-label">业务机绑定码</span>
+                    <span class="collector-bind-code" id="collectorBindCode">未生成</span>
+                    <span>
+                      <button type="button" onclick="createCollectorBindCode()">生成绑定码</button>
                     </span>
-                    <span id="collectionModeState" class="collector-mode-state">读取中</span>
+                    <span id="collectorBindState" class="collector-bind-state">用于业务机采集助手连接本 Web 后端</span>
                   </div>
                   <div class="raw-record-box">
                     <div id="collectorRawRecords" class="raw-record-list" aria-live="polite"></div>
@@ -847,9 +844,8 @@ const waybillStart = document.getElementById('waybillStart');
 const waybillStop = document.getElementById('waybillStop');
 const waybillRawDownload = document.getElementById('waybillRawDownload');
 const waybillProcessedDownload = document.getElementById('waybillProcessedDownload');
-const collectionModeFiltered = document.getElementById('collectionModeFiltered');
-const collectionModeFull = document.getElementById('collectionModeFull');
-const collectionModeState = document.getElementById('collectionModeState');
+const collectorBindCode = document.getElementById('collectorBindCode');
+const collectorBindState = document.getElementById('collectorBindState');
 const collectorRawRecords = document.getElementById('collectorRawRecords');
 const collectorRawText = document.getElementById('collectorRawText');
 const collectorRawMeta = document.getElementById('collectorRawMeta');
@@ -966,39 +962,27 @@ function appendText(parent, className, text, tagName = 'div') {
   return node;
 }
 
-function collectionModeLabel(mode) {
-  return mode === 'full' ? '全量采集' : '筛选采集';
-}
-
-function setCollectorModeButtons(mode, config) {
-  const value = mode === 'full' ? 'full' : 'filtered';
-  collectionModeFiltered.classList.toggle('active', value === 'filtered');
-  collectionModeFull.classList.toggle('active', value === 'full');
-  const updated = config && config.updated_at ? `，${config.updated_by || 'system'} ${config.updated_at}` : '';
-  collectionModeState.textContent = `当前：${collectionModeLabel(value)}${updated}`;
-}
-
-async function setCollectorMode(mode) {
+async function createCollectorBindCode() {
   try {
-    const r = await fetch('/api/collector/config', {
-      method: 'PUT',
+    const r = await fetch('/api/collector/bind-code', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ collection_mode: mode, updated_by: 'web', collector_id: 'web' })
+      body: JSON.stringify({ created_by: 'web' })
     });
     const d = await r.json();
-    if (!d.ok) throw new Error(d.error || '模式保存失败');
-    setCollectorModeButtons(d.collection_mode, d);
-    setStatus('ok', '采集模式已更新', `当前模式：${collectionModeLabel(d.collection_mode)}`);
-    await refreshWaybillStatus();
+    if (!d.ok) throw new Error(d.error || '绑定码生成失败');
+    collectorBindCode.textContent = d.bind_code || '-';
+    collectorBindState.textContent = d.expires_at ? `有效期至 ${d.expires_at}` : '已生成';
+    setStatus('ok', '业务机绑定码已生成', `在业务机采集助手中输入绑定码：${d.bind_code || '-'}`);
   } catch (e) {
-    setStatus('err', '采集模式更新失败', e.message);
+    setStatus('err', '绑定码生成失败', e.message);
   }
 }
 
 function rawRecordTitle(row) {
   const source = row.machine_label || row.collector_id || '采集记录';
-  const mode = row.collection_mode ? collectionModeLabel(row.collection_mode) : '未知模式';
-  return `${source} / ${mode}`;
+  const rowid = row.component_rowid ? `rowid ${row.component_rowid}` : '未记录 rowid';
+  return `${source} / ${rowid}`;
 }
 
 function renderRawRecords(records) {
@@ -1020,7 +1004,7 @@ function renderRawRecords(records) {
     item.className = `raw-record-item ${row.record_id === activeId ? 'active' : ''}`.trim();
     item.dataset.recordId = row.record_id || '';
     appendText(item, 'raw-record-main', rawRecordTitle(row));
-    appendText(item, 'raw-record-meta', `${row.parse_status || '-'} · ${row.created_at || ''}`);
+    appendText(item, 'raw-record-meta', `${row.extract_status || '-'} · task ${row.task_id || '-'} · ${row.created_at || ''}`);
     item.addEventListener('click', () => loadRawRecordDetail(row.record_id, item));
     collectorRawRecords.appendChild(item);
   });
@@ -1032,14 +1016,18 @@ function renderRawRecords(records) {
 async function loadRawRecordDetail(recordId, item) {
   if (!recordId) return;
   try {
-    const r = await fetch(`/api/collector/raw-records/${encodeURIComponent(recordId)}`, { cache: 'no-store' });
+    const r = await fetch(`/api/collector/records/${encodeURIComponent(recordId)}`, { cache: 'no-store' });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || '原文读取失败');
     const record = d.record || {};
     selectedRawRecordId = record.record_id || recordId;
-    selectedRawRecordText = record.raw_print_text || '';
+    selectedRawRecordText = [
+      record.print_text_raw || '未采集到打印文字',
+      record.raw_msg_json ? `\n\nraw_msg_json:\n${record.raw_msg_json}` : '',
+      record.raw_document_json ? `\n\nraw_document_json:\n${record.raw_document_json}` : ''
+    ].join('');
     collectorRawText.textContent = selectedRawRecordText || '未采集到原文';
-    collectorRawMeta.textContent = `${collectionModeLabel(record.collection_mode)} · ${record.parse_status || '-'} · ${record.raw_length || 0} 字`;
+    collectorRawMeta.textContent = `${record.extract_status || '-'} · rowid ${record.component_rowid || '-'} · ${record.raw_length || 0} 字`;
     collectorRawRecords.querySelectorAll('.raw-record-item').forEach((node) => node.classList.remove('active'));
     if (item) item.classList.add('active');
   } catch (e) {
@@ -1070,15 +1058,15 @@ function collectorComponentText(row) {
 }
 
 function collectorUploadText(row) {
-  if (!row.uploaded) return '未回传';
-  const records = Number(row.uploaded_records || 0);
-  return `已回传 ${records} 条`;
+  const records = Number(row.uploaded_records || row.last_upload_count || 0);
+  if (!records) return '未回传';
+  return `最近回传 ${records} 条`;
 }
 
 function renderWaybillCollectors(collectors) {
   waybillCollectors.textContent = '';
   if (!collectors.length) {
-    appendText(waybillCollectors, 'collector-empty', '暂无业务机连接。业务机监听服务连上服务器后，会自动新增到这里。');
+    appendText(waybillCollectors, 'collector-empty', '暂无业务机连接。业务机采集助手连上服务器后，会自动新增到这里。');
     return;
   }
 
@@ -1094,6 +1082,11 @@ function renderWaybillCollectors(collectors) {
 
     const identity = row.hostname || row.machine_name || row.client_id || '-';
     appendText(card, 'collector-meta', identity);
+    appendText(
+      card,
+      'collector-meta',
+      `agent ${row.agent_version || '-'} / protocol ${row.protocol_version || '-'}${row.upgrade_required ? ' / 需要升级' : ''}`
+    );
 
     const foot = document.createElement('div');
     foot.className = 'collector-foot';
@@ -1119,7 +1112,6 @@ async function refreshWaybillStatus() {
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || '读取失败');
     setWaybillButtons(!!d.active);
-    setCollectorModeButtons(d.collection_mode || 'filtered', d.collector_config || {});
     renderRawRecords(d.raw_records || []);
     const collectors = d.collectors || [];
     renderWaybillCollectors(collectors);
@@ -1144,11 +1136,10 @@ async function refreshWaybillStatus() {
           : `未启动。${collectorText}。有历史原始/识别文件可下载（原始 ${d.last_raw_count || 0} 条，识别 ${d.last_processed_count || 0} 条），不会自动参与本次生成`
       );
     } else {
-      setWaybillText(`未启动。${collectorText}。点击开始后由业务机监听服务记录本机打印基准`);
+      setWaybillText(`未启动。${collectorText}。点击开始后由业务机采集助手记录本机打印基准`);
     }
   } catch (e) {
     setWaybillButtons(false);
-    setCollectorModeButtons('filtered', {});
     renderWaybillCollectors([]);
     renderRawRecords([]);
     setWaybillText(`监听状态读取失败：${e.message}`);

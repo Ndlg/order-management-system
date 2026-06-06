@@ -13,18 +13,10 @@ SRC_ROOT = Path(__file__).resolve().parents[1]
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, Header, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from core import collector_raw_records
-from core.collector_config import (
-    DEFAULT_COLLECTOR_ID,
-    load_collector_config,
-    maybe_accept_collector_config,
-    public_collector_config,
-    save_collector_config,
-    validate_collection_mode,
-)
+from core import collector_agent_store
 from core.order_core import generate_order_file
 from core.waybill_raw_pipeline import parse_raw_waybill_records, write_processed_waybill_xlsx
 from utils.app_info import APP_VERSION
@@ -160,31 +152,45 @@ def collector_is_online(collector, max_age_seconds=WAYBILL_COLLECTOR_ONLINE_SECO
 def public_waybill_collectors():
     uploads = WAYBILL_REMOTE_STATE.get("uploads", {})
     collector_items = WAYBILL_REMOTE_STATE.get("collectors", {})
-    client_ids = sorted(set(collector_items.keys()) | set(uploads.keys()))
+    persisted_agents = {row.get("client_id"): row for row in collector_agent_store.list_agents_public() if row.get("client_id")}
+    client_ids = sorted(set(persisted_agents.keys()) | set(collector_items.keys()) | set(uploads.keys()))
     rows = []
     for client_id in client_ids:
+        agent = persisted_agents.get(client_id, {})
         item = collector_items.get(client_id, {})
         upload = uploads.get(client_id, {})
-        components = item.get("components") if isinstance(item.get("components"), list) else []
+        components = (
+            agent.get("component_status")
+            if isinstance(agent.get("component_status"), list)
+            else item.get("component_status")
+            if isinstance(item.get("component_status"), list)
+            else item.get("components")
+            if isinstance(item.get("components"), list)
+            else []
+        )
         rows.append(
             {
                 "client_id": client_id,
-                "machine_name": item.get("machine_name") or upload.get("machine_name") or "",
-                "machine_label": item.get("machine_label") or upload.get("machine_label") or client_id,
-                "hostname": item.get("hostname") or upload.get("hostname") or "",
-                "username": item.get("username") or upload.get("username") or "",
-                "platform": item.get("platform") or "",
-                "last_seen": item.get("last_seen") or "",
-                "online": collector_is_online(item),
+                "machine_name": agent.get("machine_name") or item.get("machine_name") or upload.get("machine_name") or "",
+                "machine_label": agent.get("machine_label") or item.get("machine_label") or upload.get("machine_label") or client_id,
+                "hostname": agent.get("hostname") or item.get("hostname") or upload.get("hostname") or "",
+                "username": agent.get("username") or item.get("username") or upload.get("username") or "",
+                "platform": agent.get("platform") or item.get("platform") or "",
+                "last_seen": agent.get("last_seen") or item.get("last_seen") or "",
+                "online": bool(agent.get("online")) or collector_is_online(item),
                 "components": components,
+                "component_status": components,
                 "component_count": len(components),
                 "available_components": len([row for row in components if row.get("exists")]),
                 "uploaded": bool(upload),
-                "uploaded_records": len(upload.get("records", [])) if upload else 0,
-                "uploaded_at": upload.get("uploaded_at") or "",
+                "uploaded_records": len(upload.get("records", [])) if upload else int(agent.get("last_upload_count") or 0),
+                "uploaded_at": upload.get("uploaded_at") or agent.get("last_upload_at") or "",
                 "records_found": upload.get("records_found", 0) if upload else 0,
-                "collection_mode": item.get("collection_mode") or upload.get("collection_mode") or "",
-                "collector_version": item.get("collector_version") or upload.get("collector_version") or "",
+                "agent_version": agent.get("agent_version") or item.get("agent_version") or upload.get("agent_version") or "",
+                "protocol_version": agent.get("protocol_version") or item.get("protocol_version") or upload.get("protocol_version") or "",
+                "upgrade_required": bool(agent.get("upgrade_required")),
+                "upgrade_message": agent.get("upgrade_message") or "",
+                "download_url": agent.get("download_url") or "",
             }
         )
     return rows
@@ -313,7 +319,6 @@ def waybill_status_payload():
     last_raw_count = WAYBILL_REMOTE_STATE.get("last_raw_count", 0) or waybill_raw_row_count(last_raw_file)
     last_processed_file = latest_waybill_processed_file()
     last_processed_count = WAYBILL_REMOTE_STATE.get("last_processed_count", 0) or waybill_raw_row_count(last_processed_file)
-    collector_config = public_collector_config()
     return {
         "ok": True,
         "web_version": WEB_VERSION,
@@ -336,9 +341,9 @@ def waybill_status_payload():
         "uploaded_collectors": len(WAYBILL_REMOTE_STATE.get("uploads", {})),
         "template_name": WAYBILL_TEMPLATE_NAME,
         "processed_template_name": WAYBILL_PROCESSED_TEMPLATE_NAME,
-        "collector_config": collector_config,
-        "collection_mode": collector_config.get("collection_mode"),
-        "raw_records": collector_raw_records.list_raw_records(limit=10),
+        "collector_version": collector_agent_store.LATEST_AGENT_VERSION,
+        "collector_protocol_version": collector_agent_store.COLLECTOR_PROTOCOL_VERSION,
+        "raw_records": collector_agent_store.list_raw_records(limit=10),
     }
 
 
@@ -411,39 +416,144 @@ def get_current_system():
     return data, "default"
 
 
-@app.get("/api/collector/config")
-def api_collector_config():
-    return {"ok": True, "web_version": WEB_VERSION, **public_collector_config()}
+@app.post("/api/collector/bind-code")
+def api_collector_bind_code(payload: dict | None = None):
+    payload = payload or {}
+    code = collector_agent_store.create_bind_code(created_by=str(payload.get("created_by") or "web"))
+    return {"ok": True, "web_version": WEB_VERSION, **code}
 
 
-@app.put("/api/collector/config")
-def api_collector_config_update(payload: dict):
-    try:
-        config = save_collector_config(
-            payload.get("collection_mode"),
-            updated_by=str(payload.get("updated_by") or "web"),
-            collector_id=str(payload.get("collector_id") or DEFAULT_COLLECTOR_ID),
-        )
-        return {"ok": True, "web_version": WEB_VERSION, **public_collector_config(config)}
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": str(exc)}, status_code=400)
+@app.post("/api/collector/bind")
+def api_collector_bind(payload: dict):
+    result, error = collector_agent_store.bind_agent(payload)
+    if error:
+        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": error}, status_code=400)
+    return {"ok": True, "web_version": WEB_VERSION, **(result or {}), **collector_agent_store.version_info()}
 
 
-@app.get("/api/collector/raw-records")
-def api_collector_raw_records(limit: int = 50):
+@app.post("/api/collector/poll")
+def api_collector_poll(payload: dict, authorization: str = Header(default="")):
+    agent, error = collector_agent_store.authenticate_agent(payload, authorization)
+    if error:
+        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": error}, status_code=401)
+
+    agent = collector_agent_store.upsert_agent_from_poll(payload, agent or {})
+    client_id = str(agent.get("client_id") or payload.get("client_id") or "")
+    collectors = WAYBILL_REMOTE_STATE.setdefault("collectors", {})
+    collectors[client_id] = {
+        "client_id": client_id,
+        "machine_name": str(payload.get("machine_name") or agent.get("machine_name") or ""),
+        "machine_label": str(payload.get("machine_label") or agent.get("machine_label") or client_id),
+        "hostname": str(payload.get("hostname") or agent.get("hostname") or ""),
+        "username": str(payload.get("username") or agent.get("username") or ""),
+        "platform": str(payload.get("platform") or agent.get("platform") or ""),
+        "active_batch_id": str(payload.get("active_batch_id") or ""),
+        "component_status": payload.get("component_status") if isinstance(payload.get("component_status"), list) else [],
+        "agent_version": str(payload.get("agent_version") or agent.get("agent_version") or ""),
+        "protocol_version": str(payload.get("protocol_version") or agent.get("protocol_version") or ""),
+        "last_seen": current_time_text(),
+    }
+
+    status_text = str(WAYBILL_REMOTE_STATE.get("status") or "idle")
+    batch_id = str(WAYBILL_REMOTE_STATE.get("batch_id") or "")
+    uploads = WAYBILL_REMOTE_STATE.get("uploads", {})
+    if collector_agent_store.agent_needs_upgrade(agent.get("agent_version"), agent.get("protocol_version")):
+        command = "upgrade"
+    elif status_text == "running" and batch_id:
+        command = "start"
+    elif status_text in {"stopping", "finished"} and batch_id and client_id not in uploads:
+        command = "stop"
+    else:
+        command = "idle"
+
+    version = collector_agent_store.version_info()
+    version["upgrade_required"] = command == "upgrade"
+    if command == "upgrade":
+        version["upgrade_message"] = "业务机采集助手版本或协议不兼容，请升级后继续采集。"
     return {
         "ok": True,
         "web_version": WEB_VERSION,
-        "records": collector_raw_records.list_raw_records(limit=limit),
+        "command": command,
+        "batch_id": batch_id,
+        "status": status_text,
+        "poll_interval_seconds": 2,
+        **version,
     }
 
 
-@app.get("/api/collector/raw-records/{record_id}")
-def api_collector_raw_record_detail(record_id: str):
-    record = collector_raw_records.get_raw_record(record_id)
+@app.post("/api/collector/upload")
+def api_collector_upload(payload: dict, authorization: str = Header(default="")):
+    agent, error = collector_agent_store.authenticate_agent(payload, authorization)
+    if error:
+        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": error}, status_code=401)
+
+    client_id = str(payload.get("client_id") or "").strip()
+    batch_id = str(payload.get("batch_id") or "").strip()
+    if not client_id or not batch_id:
+        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": "client_id_and_batch_id_required"}, status_code=400)
+    if batch_id != str(WAYBILL_REMOTE_STATE.get("batch_id") or ""):
+        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": "batch_id_not_current"}, status_code=409)
+
+    records_raw = payload.get("records", [])
+    if not isinstance(records_raw, list):
+        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": "records_must_be_list"}, status_code=400)
+    try:
+        accepted_records = collector_agent_store.append_raw_records(records_raw, payload, agent or {})
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": str(exc)}, status_code=400)
+
+    machine_name = str(payload.get("machine_name") or agent.get("machine_name") or "")
+    machine_label = str(payload.get("machine_label") or agent.get("machine_label") or machine_name or client_id)
+    WAYBILL_REMOTE_STATE.setdefault("uploads", {})[client_id] = {
+        "client_id": client_id,
+        "machine_name": machine_name,
+        "machine_label": machine_label,
+        "hostname": str(payload.get("hostname") or agent.get("hostname") or ""),
+        "username": str(payload.get("username") or agent.get("username") or ""),
+        "uploaded_at": current_time_text(),
+        "records_found": int(payload.get("records_found") or len(records_raw)),
+        "agent_version": str(payload.get("agent_version") or agent.get("agent_version") or ""),
+        "protocol_version": str(payload.get("protocol_version") or agent.get("protocol_version") or ""),
+        "records": accepted_records,
+    }
+    if WAYBILL_REMOTE_STATE.get("status") in {"stopping", "finished"}:
+        finalize_remote_waybill_batch()
+    return {
+        "ok": True,
+        "web_version": WEB_VERSION,
+        "batch_id": batch_id,
+        "received": len(records_raw),
+        "accepted": len(accepted_records),
+        "uploaded_collectors": list(WAYBILL_REMOTE_STATE.get("uploads", {}).keys()),
+    }
+
+
+@app.get("/api/collector/agents")
+def api_collector_agents():
+    return {"ok": True, "web_version": WEB_VERSION, "agents": public_waybill_collectors()}
+
+
+@app.get("/api/collector/records")
+def api_collector_records(limit: int = 50, record_id: str = ""):
+    if record_id:
+        record = collector_agent_store.get_raw_record(record_id)
+        if not record:
+            return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": "record_not_found"}, status_code=404)
+        return {"ok": True, "web_version": WEB_VERSION, "record": record}
+    return {"ok": True, "web_version": WEB_VERSION, "records": collector_agent_store.list_raw_records(limit=limit)}
+
+
+@app.get("/api/collector/records/{record_id}")
+def api_collector_record_detail(record_id: str):
+    record = collector_agent_store.get_raw_record(record_id)
     if not record:
         return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": "record_not_found"}, status_code=404)
     return {"ok": True, "web_version": WEB_VERSION, "record": record}
+
+
+@app.get("/api/collector/version-info")
+def api_collector_version_info():
+    return {"ok": True, "web_version": WEB_VERSION, **collector_agent_store.version_info()}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -585,122 +695,13 @@ def api_waybill_stop():
 
 
 @app.post("/api/waybill/agent/poll")
-def api_waybill_agent_poll(payload: dict):
-    client_id = str(payload.get("client_id") or "").strip()
-    if not client_id:
-        return JSONResponse({"ok": False, "error": "client_id_required"}, status_code=400)
-    try:
-        collector_config = public_collector_config(maybe_accept_collector_config(payload))
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": str(exc)}, status_code=400)
-
-    collectors = WAYBILL_REMOTE_STATE.setdefault("collectors", {})
-    collectors[client_id] = {
-        "client_id": client_id,
-        "machine_name": str(payload.get("machine_name") or ""),
-        "machine_label": str(payload.get("machine_label") or payload.get("machine_name") or client_id),
-        "hostname": str(payload.get("hostname") or ""),
-        "username": str(payload.get("username") or ""),
-        "platform": str(payload.get("platform") or ""),
-        "active_batch_id": str(payload.get("active_batch_id") or ""),
-        "components": payload.get("components") if isinstance(payload.get("components"), list) else [],
-        "collection_mode": collector_config.get("collection_mode"),
-        "collector_version": str(payload.get("collector_version") or ""),
-        "last_seen": current_time_text(),
-    }
-
-    status_text = str(WAYBILL_REMOTE_STATE.get("status") or "idle")
-    batch_id = str(WAYBILL_REMOTE_STATE.get("batch_id") or "")
-    uploads = WAYBILL_REMOTE_STATE.get("uploads", {})
-    if status_text == "running" and batch_id:
-        command = "start"
-    elif status_text in {"stopping", "finished"} and batch_id and client_id not in uploads:
-        command = "stop"
-    else:
-        command = "idle"
-    system, _ = get_current_system()
-
-    return {
-        "ok": True,
-        "web_version": WEB_VERSION,
-        "command": command,
-        "batch_id": batch_id,
-        "status": status_text,
-        "recognition_mode": "server",
-        "collection_mode": collector_config.get("collection_mode"),
-        "collector_config": collector_config,
-        "server_rule_count": len(system.get("category_rules", []) if isinstance(system, dict) else []),
-        "poll_interval_seconds": 2,
-    }
+def api_waybill_agent_poll(payload: dict, authorization: str = Header(default="")):
+    return api_collector_poll(payload, authorization)
 
 
 @app.post("/api/waybill/agent/upload")
-def api_waybill_agent_upload(payload: dict):
-    client_id = str(payload.get("client_id") or "").strip()
-    batch_id = str(payload.get("batch_id") or "").strip()
-    if not client_id or not batch_id:
-        return JSONResponse({"ok": False, "error": "client_id_and_batch_id_required"}, status_code=400)
-    if batch_id != str(WAYBILL_REMOTE_STATE.get("batch_id") or ""):
-        return JSONResponse({"ok": False, "error": "batch_id_not_current"}, status_code=409)
-
-    records_raw = payload.get("records", [])
-    if not isinstance(records_raw, list):
-        return JSONResponse({"ok": False, "error": "records_must_be_list"}, status_code=400)
-    try:
-        collection_mode = validate_collection_mode(
-            payload.get("collection_mode") or load_collector_config().get("collection_mode")
-        )
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": str(exc)}, status_code=400)
-
-    machine_name = str(payload.get("machine_name") or "")
-    machine_label = str(payload.get("machine_label") or machine_name or client_id)
-    collector_version = str(payload.get("collector_version") or "")
-    records = []
-    for index, row in enumerate(records_raw, 1):
-        if not isinstance(row, dict):
-            continue
-        record = dict(row)
-        record["source_client_id"] = client_id
-        record.setdefault("source_record_index", index)
-        record["machine_name"] = machine_name
-        record["machine_label"] = machine_label
-        record["collection_mode"] = collection_mode
-        record["collector_version"] = collector_version
-        records.append(record)
-
-    system, _ = get_current_system()
-    collector_raw_records.append_raw_records(
-        records,
-        collection_mode=collection_mode,
-        collector_id=client_id,
-        batch_id=batch_id,
-        collector_version=collector_version,
-        rule_config=system.get("waybill_parse_rules", {}) if isinstance(system, dict) else {},
-    )
-
-    WAYBILL_REMOTE_STATE.setdefault("uploads", {})[client_id] = {
-        "client_id": client_id,
-        "machine_name": machine_name,
-        "machine_label": machine_label,
-        "hostname": str(payload.get("hostname") or ""),
-        "username": str(payload.get("username") or ""),
-        "uploaded_at": current_time_text(),
-        "records_found": int(payload.get("records_found") or len(records)),
-        "collection_mode": collection_mode,
-        "collector_version": collector_version,
-        "records": records,
-    }
-    if WAYBILL_REMOTE_STATE.get("status") in {"stopping", "finished"}:
-        finalize_remote_waybill_batch()
-    return {
-        "ok": True,
-        "web_version": WEB_VERSION,
-        "batch_id": batch_id,
-        "accepted": len(records),
-        "collection_mode": collection_mode,
-        "uploaded_collectors": list(WAYBILL_REMOTE_STATE.get("uploads", {}).keys()),
-    }
+def api_waybill_agent_upload(payload: dict, authorization: str = Header(default="")):
+    return api_collector_upload(payload, authorization)
 
 
 @app.post("/api/generate")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -19,6 +20,9 @@ DATA_ROOT = PROJECT_ROOT / "data"
 DOCS_ROOT = PROJECT_ROOT / "docs"
 TMP_ROOT = PROJECT_ROOT / "tmp"
 VERSIONS_ROOT = PROJECT_ROOT / "versions"
+COLLECTOR_PROTOCOL_VERSION = "collector.v1"
+COLLECTOR_AGENT_VERSION = "7.9.3"
+MIN_SUPPORTED_AGENT_VERSION = "7.9.3"
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("version", help="Version number, for example 7.5.1 or v7.5.1.")
     parser.add_argument("--skip-git-pull", action="store_true", help="Skip git pull before building.")
     parser.add_argument("--build-exe", action="store_true", help="Run PyInstaller and copy exe files into bin/.")
+    parser.add_argument("--build-agent", action="store_true", help="Build OrderCollectorAgent and copy it into bin/.")
     parser.add_argument("--keep-tmp", action="store_true", help="Keep tmp/build_version after the build.")
     return parser.parse_args()
 
@@ -185,6 +190,15 @@ def create_release_package(version: str, version_dir: Path, executable_files: li
     return artifact
 
 
+def create_agent_package(version: str, version_dir: Path, agent_exe: Path) -> Path:
+    artifact = version_dir / "bin" / f"OrderCollectorAgent_{version}.zip"
+    if artifact.exists():
+        artifact.unlink()
+    with zipfile.ZipFile(artifact, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.write(agent_exe, agent_exe.name)
+    return artifact
+
+
 def build_executables(version_dir: Path, log_file: Path) -> list[Path]:
     code = run_command([sys.executable, str(PROJECT_ROOT / "scripts" / "build_qt_windows.py")], log_file)
     if code != 0:
@@ -200,6 +214,50 @@ def build_executables(version_dir: Path, log_file: Path) -> list[Path]:
         copy_with_retry(exe, target)
         copied.append(target)
     return copied
+
+
+def build_collector_agent(version: str, version_dir: Path, log_file: Path) -> tuple[Path, Path]:
+    plain_version = version.lstrip("vV")
+    code = run_command(
+        [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "build_collector_agent.py"),
+            "--version",
+            plain_version,
+            "--output-dir",
+            str(version_dir / "bin"),
+        ],
+        log_file,
+    )
+    if code != 0:
+        raise SystemExit(f"OrderCollectorAgent build failed. See log: {log_file}")
+    agent_exe = version_dir / "bin" / f"OrderCollectorAgent_{version}.exe"
+    if not agent_exe.exists():
+        raise SystemExit(f"OrderCollectorAgent executable not found: {agent_exe}")
+    agent_zip = create_agent_package(version, version_dir, agent_exe)
+    return agent_exe, agent_zip
+
+
+def write_release_manifest(
+    version: str,
+    version_dir: Path,
+    agent_build_required: bool,
+    agent_artifact: Path | None,
+) -> Path:
+    manifest = {
+        "system_version": version.lstrip("vV"),
+        "collector_agent_version": COLLECTOR_AGENT_VERSION,
+        "collector_protocol_version": COLLECTOR_PROTOCOL_VERSION,
+        "min_supported_agent_version": MIN_SUPPORTED_AGENT_VERSION,
+        "compatible_agent_version": COLLECTOR_AGENT_VERSION,
+        "agent_build_required": bool(agent_build_required),
+        "agent_artifact": str(agent_artifact.relative_to(version_dir)) if agent_artifact else "",
+        "agent_upgrade_required_for_existing_users": bool(agent_build_required),
+        "release_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    path = version_dir / "release_manifest.json"
+    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
 
 
 def append_version_log(version: str, version_dir: Path, git_status: str, test_code: int, artifacts: list[Path]) -> None:
@@ -223,6 +281,7 @@ def cleanup_tmp(keep_tmp: bool) -> None:
     build_tmp.mkdir(parents=True, exist_ok=True)
     if not keep_tmp:
         shutil.rmtree(build_tmp)
+        shutil.rmtree(TMP_ROOT / "build", ignore_errors=True)
 
 
 def main() -> int:
@@ -241,6 +300,13 @@ def main() -> int:
         release_package = create_release_package(version, version_dir, executable_files)
         if release_package:
             artifacts.append(release_package)
+    agent_artifact = None
+    if args.build_agent:
+        agent_exe, agent_zip = build_collector_agent(version, version_dir, log_file)
+        artifacts.extend([agent_exe, agent_zip])
+        agent_artifact = agent_zip
+    manifest = write_release_manifest(version, version_dir, args.build_agent, agent_artifact)
+    artifacts.append(manifest)
     append_version_log(version, version_dir, git_status, test_code, artifacts)
     cleanup_tmp(args.keep_tmp)
     print(f"version_dir={version_dir}")

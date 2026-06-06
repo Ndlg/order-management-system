@@ -9,9 +9,6 @@ dist/
 tmp/*
 !tmp/.gitkeep
 *.spec
-scripts/collector_client_legacy/build_v*/
-scripts/collector_client_legacy/dist_v*/
-scripts/collector_client_legacy/spec_v*/
 
 # Runtime data
 data/*.enc
@@ -21,6 +18,8 @@ data/image_categories/
 data/images/
 data/input/*
 !data/input/.gitkeep
+!data/input/collector_samples/
+!data/input/collector_samples/.gitkeep
 data/output/*
 !data/output/.gitkeep
 data/sku_images/

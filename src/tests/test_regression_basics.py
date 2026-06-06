@@ -55,7 +55,7 @@ class RegressionBasicsTest(unittest.TestCase):
         src_root = Path(__file__).resolve().parents[1]
         misplaced_modules = [path.name for path in src_root.glob("*.py")]
         self.assertEqual(misplaced_modules, [])
-        for package in ("core", "ui", "utils", "tests"):
+        for package in ("core", "ui", "utils", "plugins", "tests"):
             self.assertTrue((src_root / package).is_dir(), package)
 
     def test_code_uses_package_import_boundaries(self) -> None:

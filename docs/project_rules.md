@@ -2,63 +2,64 @@
 
 ## 目录结构
 
-- `src/`: 主程序源码。
-- `src/core/`: 核心逻辑，包含订单解析、合并、统计、面单解析和文件输出。
-- `src/ui/`: 前端界面，包含 FastAPI Web、Qt 入口、Qt 共用组件和 UI 资源。
-- `src/utils/`: 工具函数和通用模块，包含版本信息、数据存储、安全兼容和 SKU 图片工具。
-- `src/tests/`: 单元测试和回归测试。
-- `src/` 根目录不存放业务 `.py` 文件，只保留子包目录。
-- `data/input/`: 原始订单文件、图片等输入数据，禁止直接修改。
-- `data/reference/`: 共用参考数据，例如尺码表、鞋款映射表、SKU 关系表。
-- `data/output/`: 系统生成输出目录。
-- `data/` 根目录也承载本地生产数据，例如 `system_data.enc`、`import_templates.json`、`images/`、`image_categories/`，供项目内生成的 exe 共用。
-- `versions/vX.Y.Z/`: 每个新版本的唯一产物目录。
-- `docs/`: 说明书、版本说明、规范。
-- `scripts/`: 构建、迁移、清理等辅助脚本。
-- `tmp/`: 临时文件目录。
+- `src/`：主程序源码。
+- `src/core/`：核心逻辑，包括订单解析、合并、统计、面单解析和采集助手后端存储。
+- `src/ui/`：前端界面，包括 FastAPI Web、Qt 入口、Qt 公共组件和 UI 资源。
+- `src/plugins/collector_agent/`：官方业务机采集助手 `OrderCollectorAgent` 源码。
+- `src/utils/`：工具函数和通用模块。
+- `src/tests/`：单元测试和回归测试。
+- `data/input/`：原始订单文件、图片、采集样本等输入数据，禁止直接修改生产原件。
+- `data/reference/`：共用参考数据，例如尺码表、鞋款映射表、SKU 关系表、采集样本。
+- `data/output/`：系统生成输出目录。
+- `versions/vX.Y.Z/`：每个新版本的唯一产物目录。
+- `docs/`：说明书、版本说明、规范和需求任务书。
+- `scripts/`：构建、迁移、清理等辅助脚本。
+- `tmp/`：临时文件目录。
 
 ## 版本生成
 
-版本号遵循 `主版本.次版本.修订号`，例如 `7.5.1`。
-
-生成版本：
+版本号遵循 `主版本.次版本.修订号`，例如 `7.9.3`。
 
 ```powershell
-python scripts/build_version.py 7.5.1
+python scripts/build_version.py 7.9.3 --build-exe --build-agent
 ```
 
-生成目录：
+版本目录：
 
 ```text
-versions/v7.5.1/
+versions/v7.9.3/
 ├── bin/
 ├── logs/
 ├── source/
-└── tests/
+├── tests/
+└── release_manifest.json
 ```
 
-目录规则：
+规则：
 
-- `bin/`: 只放生产交付物，例如 `OrderSystem_vX.Y.Z.exe` 或只包含 exe 的 `OrderSystem_vX.Y.Z.zip`。
-- `source/`: 只放当代源码快照，例如 `OrderSystem_source_vX.Y.Z.zip`，用于回溯和审计，不作为生产交付物。
-- `logs/`: 构建日志。
-- `tests/`: 回归测试数据副本和报告。
+- 所有版本产物必须进入 `versions/vX.Y.Z/`。
+- `bin/` 只放生产交付物，例如主系统 EXE、`OrderSystem_vX.Y.Z.zip`、`OrderCollectorAgent_vX.Y.Z.exe`、`OrderCollectorAgent_vX.Y.Z.zip`。
+- `source/` 只放源码快照，用于回溯和审计，不作为业务机交付包。
+- `logs/` 写入 `YYYYMMDD_HHMMSS.log`。
+- `tests/` 写入测试数据副本和 `report.log`。
+- `release_manifest.json` 必须声明主系统版本、采集助手版本、协议版本和业务机是否需要升级。
+- 临时文件只能放到 `tmp/` 或版本目录，构建结束后应清理中间目录。
 
-默认会生成源码快照和测试报告，不生成 exe。如需尝试 PyInstaller 打包：
+## 业务机采集助手规则
 
-```powershell
-python scripts/build_version.py 7.5.1 --build-exe
-```
+- 官方名称：订单整理系统 - 业务机采集助手。
+- 内部名称：`OrderCollectorAgent`。
+- 源码位置：`src/plugins/collector_agent/`。
+- 运行位置：业务机独立 EXE / 后台采集服务 / 简易界面。
+- 业务机交付物：只发 `OrderCollectorAgent_vX.Y.Z.zip` 或对应安装包。
+- 不得把源码、测试数据、生产 `data/` 打包给业务机。
+- 采集助手不做识别、不做筛选、不区分采集模式、不生成整理 Excel。
+- 每个进入批次范围的 `component_rowid` 至少上传一条记录。
+- 上传失败必须进入本地 pending 队列，服务端确认 accepted 后才允许更新游标。
 
-生成后的处理规则：
+## 数据和输出
 
-- 给实际使用的人，只拿 `versions/vX.Y.Z/bin/` 里的 exe 或 release zip。
-- 源码不放进生产交付包；源码以 GitHub main 和 `versions/vX.Y.Z/source/` 快照为准。
-- 生产数据不打包进 exe，也不放进 release zip；exe 在项目内运行时共用项目根目录 `data/`。
-
-## 测试和输出
-
-- 新版本测试数据会从 `data/input/` 和 `data/reference/` 复制到 `versions/vX.Y.Z/tests/`。
-- 回归测试报告写入 `versions/vX.Y.Z/tests/report.log`。
-- 构建日志写入 `versions/vX.Y.Z/logs/YYYYMMDD_HHMMSS.log`。
-- 临时文件统一进入 `tmp/` 或版本目录，不能散落在根目录。
+- `data/input/` 和 `data/reference/` 是测试和固定参考数据。
+- `data/output/` 是运行输出目录。
+- 生产数据可在项目根目录 `data/` 下被 exe 共用，但不得打包进业务机采集助手。
+- Codex 输出的临时文件不得散落在根目录。
