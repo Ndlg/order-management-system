@@ -522,6 +522,29 @@ class AdminWindow(QMainWindow):
         btns.addWidget(apply_btn)
         form.addRow(btns)
         editor_layout.addWidget(form_widget)
+
+        capture_widget, capture_form = self._form_card()
+        self.waybill_capture_include = QTextEdit()
+        self.waybill_capture_include.setPlaceholderText("一行一个关键词；留空表示不过滤包含条件")
+        self.waybill_capture_include.setMaximumHeight(76)
+        self.waybill_capture_exclude = QTextEdit()
+        self.waybill_capture_exclude.setPlaceholderText("一行一个关键词；命中后业务机不上传该打印记录")
+        self.waybill_capture_exclude.setMaximumHeight(76)
+        self.waybill_capture_state = QLabel("采集规则会下发给业务机工具的“规则过滤采集”模式。")
+        self.waybill_capture_state.setObjectName("Muted")
+        capture_save = make_button("保存采集规则", primary=True)
+        capture_clear = make_button("清空采集规则")
+        capture_save.clicked.connect(self.save_waybill_capture_rules)
+        capture_clear.clicked.connect(self.clear_waybill_capture_rules)
+        capture_btns = QHBoxLayout()
+        capture_btns.addWidget(capture_save)
+        capture_btns.addWidget(capture_clear)
+        capture_form.addRow("包含关键词", self.waybill_capture_include)
+        capture_form.addRow("排除关键词", self.waybill_capture_exclude)
+        capture_form.addRow(capture_btns)
+        capture_form.addRow(self.waybill_capture_state)
+        editor_layout.addWidget(titled_panel("业务机采集规则", capture_widget))
+
         splitter.addWidget(titled_panel("解析规则", editor))
         splitter.setStretchFactor(0, 4)
         splitter.setStretchFactor(1, 2)
@@ -778,6 +801,7 @@ class AdminWindow(QMainWindow):
             self.render_dashboard()
             self.render_rules()
             self.render_waybill_parse_rules()
+            self.render_waybill_capture_rules()
             self.render_stalls()
             self.render_templates()
             self.refresh_image_categories()
@@ -792,6 +816,7 @@ class AdminWindow(QMainWindow):
         self.data["active_system"] = self.system_id
         self.data["category_rules"] = self.system.get("category_rules", [])
         self.data["waybill_parse_rules"] = self.system.get("waybill_parse_rules", {})
+        self.data["waybill_capture_rules"] = self.system.get("waybill_capture_rules", {})
         self.data["stall_map"] = self.system.get("stall_map", {})
         self.data["image_map"] = {}
         self.data["import_templates"] = self.system.get("import_templates", [])
@@ -1107,6 +1132,46 @@ class AdminWindow(QMainWindow):
                         " / ".join(rule.get(prefix_key, [])),
                     ],
                 )
+
+    def normalize_waybill_capture_rules(self, config=None):
+        config = config if isinstance(config, dict) else self.system.get("waybill_capture_rules", {})
+        if not isinstance(config, dict):
+            config = {}
+        return {
+            "include_keywords": self.split_waybill_rule_input("\n".join(config.get("include_keywords", []) or []))
+            if isinstance(config.get("include_keywords", []), list)
+            else self.split_waybill_rule_input(str(config.get("include_keywords") or "")),
+            "exclude_keywords": self.split_waybill_rule_input("\n".join(config.get("exclude_keywords", []) or []))
+            if isinstance(config.get("exclude_keywords", []), list)
+            else self.split_waybill_rule_input(str(config.get("exclude_keywords") or "")),
+        }
+
+    def render_waybill_capture_rules(self):
+        if not hasattr(self, "waybill_capture_include"):
+            return
+        rules = self.normalize_waybill_capture_rules()
+        self.system["waybill_capture_rules"] = rules
+        self.waybill_capture_include.setPlainText("\n".join(rules.get("include_keywords", [])))
+        self.waybill_capture_exclude.setPlainText("\n".join(rules.get("exclude_keywords", [])))
+        self.waybill_capture_state.setText(
+            f"已配置：包含 {len(rules.get('include_keywords', []))} 条，排除 {len(rules.get('exclude_keywords', []))} 条。"
+            " 只影响业务机工具的规则过滤采集模式。"
+        )
+
+    def save_waybill_capture_rules(self):
+        rules = {
+            "include_keywords": self.split_waybill_rule_input(self.waybill_capture_include.toPlainText()),
+            "exclude_keywords": self.split_waybill_rule_input(self.waybill_capture_exclude.toPlainText()),
+        }
+        self.system["waybill_capture_rules"] = rules
+        self.persist()
+        self.render_waybill_capture_rules()
+        self.statusBar().showMessage("业务机采集规则已保存")
+
+    def clear_waybill_capture_rules(self):
+        self.waybill_capture_include.clear()
+        self.waybill_capture_exclude.clear()
+        self.save_waybill_capture_rules()
 
     def load_selected_waybill_rule(self):
         row = selected_row(self.waybill_rule_table)

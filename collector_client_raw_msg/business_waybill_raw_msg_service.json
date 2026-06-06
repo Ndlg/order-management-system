@@ -1,0 +1,6 @@
+{
+  "order_server_url": "http://127.0.0.1:8000",
+  "poll_interval_seconds": 2,
+  "machine_name": "",
+  "machine_label": ""
+}

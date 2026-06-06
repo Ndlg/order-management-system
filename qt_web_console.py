@@ -160,7 +160,7 @@ class WebConsoleWindow(QMainWindow):
         grid.setColumnStretch(4, 1)
 
         self.collector_table = QTableWidget()
-        configure_table(self.collector_table, ["业务机", "状态", "组件", "上传", "最后心跳"])
+        configure_table(self.collector_table, ["业务机", "状态", "模式", "组件", "上传", "最后心跳"])
         self.collector_table.setMinimumHeight(90)
         self.collector_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -361,6 +361,7 @@ class WebConsoleWindow(QMainWindow):
                 [
                     item.get("machine_label") or item.get("client_id", ""),
                     "在线" if item.get("online") else "离线",
+                    item.get("active_capture_mode_label") or item.get("preferred_capture_mode_label") or "",
                     component_text,
                     upload_text,
                     item.get("last_seen") or item.get("uploaded_at") or "",

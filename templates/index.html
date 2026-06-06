@@ -415,6 +415,17 @@
       min-width: 0;
     }
 
+    .capture-mode-line {
+      display: grid;
+      grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+    }
+
+    .capture-mode-line select {
+      height: 38px;
+    }
+
     .monitor-actions .btn {
       flex: 0 0 auto;
     }
@@ -546,6 +557,7 @@
       .form-grid { grid-template-columns: 1fr; }
       .mode-group { grid-template-columns: 1fr; }
       .file-zone { align-items: stretch; flex-direction: column; }
+      .capture-mode-line { grid-template-columns: 1fr; }
       .monitor-actions { justify-content: flex-start; }
       .download-box { align-items: stretch; flex-direction: column; }
       .download-link { width: 100%; }
@@ -608,6 +620,13 @@
               <div class="monitor-box">
                 <div class="monitor-main">
                   <div class="monitor-title">业务机同步采集本次打印信息原文</div>
+                  <div class="capture-mode-line">
+                    <select id="waybillCaptureMode" aria-label="采集模式">
+                      <option value="raw_full">原始全量采集</option>
+                      <option value="filtered">规则过滤采集</option>
+                    </select>
+                    <div id="waybillCaptureModeHint" class="monitor-detail">原始全量：监听期间 task.msg 原样上传；规则过滤：按系统采集规则筛选后上传。</div>
+                  </div>
                   <div id="waybillDetail" class="monitor-detail">读取业务机监听状态中...</div>
                   <div id="waybillCollectors" class="collector-list" aria-live="polite"></div>
                 </div>
@@ -692,6 +711,8 @@ const waybillStart = document.getElementById('waybillStart');
 const waybillStop = document.getElementById('waybillStop');
 const waybillRawDownload = document.getElementById('waybillRawDownload');
 const waybillProcessedDownload = document.getElementById('waybillProcessedDownload');
+const waybillCaptureMode = document.getElementById('waybillCaptureMode');
+const waybillCaptureModeHint = document.getElementById('waybillCaptureModeHint');
 const WAYBILL_RAW_TEMPLATE_NAME = '监控面单-原文模式';
 const WAYBILL_PROCESSED_TEMPLATE_NAME = '监控面单-识别结果模式';
 let serverFiles = [];
@@ -762,6 +783,7 @@ function updateFileDetail() {
 function setWaybillButtons(active) {
   waybillStart.disabled = active;
   waybillStop.disabled = !active;
+  if (waybillCaptureMode) waybillCaptureMode.disabled = active;
 }
 
 function setWaybillText(text) {
@@ -816,6 +838,26 @@ function collectorUploadText(row) {
   return `已回传 ${records} 条`;
 }
 
+function selectedWaybillCaptureMode() {
+  return waybillCaptureMode ? (waybillCaptureMode.value || 'raw_full') : 'raw_full';
+}
+
+function setWaybillCaptureMode(mode, locked) {
+  if (!waybillCaptureMode) return;
+  const value = mode || 'raw_full';
+  if ([...waybillCaptureMode.options].some((opt) => opt.value === value)) {
+    waybillCaptureMode.value = value;
+  }
+  waybillCaptureMode.disabled = !!locked;
+}
+
+function captureRuleText(payload) {
+  const counts = payload.capture_rule_counts || {};
+  const includeCount = Number(counts.include_keywords || 0);
+  const excludeCount = Number(counts.exclude_keywords || 0);
+  return `采集规则：包含 ${includeCount} 条，排除 ${excludeCount} 条`;
+}
+
 function renderWaybillCollectors(collectors) {
   waybillCollectors.textContent = '';
   if (!collectors.length) {
@@ -835,6 +877,7 @@ function renderWaybillCollectors(collectors) {
 
     const identity = row.hostname || row.machine_name || row.client_id || '-';
     appendText(card, 'collector-meta', identity);
+    appendText(card, 'collector-meta', row.active_capture_mode_label || row.preferred_capture_mode_label || '模式未上报');
 
     const foot = document.createElement('div');
     foot.className = 'collector-foot';
@@ -860,6 +903,10 @@ async function refreshWaybillStatus() {
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || '读取失败');
     setWaybillButtons(!!d.active);
+    setWaybillCaptureMode(d.capture_mode || selectedWaybillCaptureMode(), !!d.active);
+    if (waybillCaptureModeHint) {
+      waybillCaptureModeHint.textContent = `${d.capture_mode_label || '原始全量采集'}。${captureRuleText(d)}`;
+    }
     const collectors = d.collectors || [];
     renderWaybillCollectors(collectors);
     setWaybillDownloads(
@@ -872,9 +919,10 @@ async function refreshWaybillStatus() {
     const onlineCollectors = d.online_collectors || collectors.filter(row => row.online).length || 0;
     const collectorText = totalCollectors ? `已连接 ${totalCollectors} 台，在线 ${onlineCollectors} 台` : '暂无业务机连接';
     const uploadedText = d.uploaded_collectors ? `，已回传 ${d.uploaded_collectors} 台` : '';
+    const modeText = d.capture_mode_label || '原始全量采集';
     if (d.active) {
       selectTemplate(d.template_name || WAYBILL_RAW_TEMPLATE_NAME);
-      setWaybillText(`监听中，批次 ${d.batch_id || '-'}，${collectorText}${uploadedText}，本次新面单 ${d.session_records || 0} 条`);
+      setWaybillText(`监听中，批次 ${d.batch_id || '-'}，模式 ${modeText}，${collectorText}${uploadedText}，本次新面单 ${d.session_records || 0} 条`);
     } else if (d.last_raw_file || d.last_processed_file) {
       const loadedCurrentFile = d.last_processed_file && serverFiles.includes(d.last_processed_file);
       setWaybillText(
@@ -895,18 +943,25 @@ async function refreshWaybillStatus() {
 
 async function startWaybillMonitor() {
   try {
-    const r = await fetch('/api/waybill/start', { method: 'POST', cache: 'no-store' });
+    const captureMode = selectedWaybillCaptureMode();
+    const r = await fetch('/api/waybill/start', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ capture_mode: captureMode }),
+    });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || '启动失败');
     serverFiles = [];
     filesInput.value = '';
+    setWaybillCaptureMode(d.capture_mode || captureMode, true);
     selectTemplate(d.template_name || WAYBILL_RAW_TEMPLATE_NAME);
     fileDetail.textContent = `打印机监听中，本次从 ${d.started_at || '现在'} 开始统计`;
     setWaybillButtons(true);
     setWaybillDownloads('', '', '', '');
     renderWaybillCollectors(d.collectors || []);
-    setWaybillText(`监听中，批次 ${d.batch_id || '-'}。已连接的业务机会各自记录本机基准。`);
-    setStatus('ok', '打印机监听已启动', '现在让已连接的业务机正常打印面单；打印完成后点击“结束监听并加入待处理”。');
+    setWaybillText(`监听中，批次 ${d.batch_id || '-'}，模式 ${d.capture_mode_label || '原始全量采集'}。已连接的业务机会各自记录本机基准。`);
+    setStatus('ok', '打印机监听已启动', `模式：${d.capture_mode_label || '原始全量采集'}\n现在让已连接的业务机正常打印面单；打印完成后点击“结束监听并加入待处理”。`);
   } catch (e) {
     setStatus('err', '打印机监听启动失败', e.message);
   }
@@ -918,6 +973,7 @@ async function stopWaybillMonitor() {
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || '结束失败');
     setWaybillButtons(false);
+    setWaybillCaptureMode(d.capture_mode || selectedWaybillCaptureMode(), false);
     renderWaybillCollectors(d.collectors || []);
 
     if (!d.raw_file && !d.processed_file) {
