@@ -10,13 +10,6 @@ dist/
 collector_client_legacy/build_v*/
 collector_client_legacy/dist_v*/
 collector_client_legacy/spec_v*/
-collector_client_business_v2/build_v*/
-collector_client_business_v2/dist_v*/
-collector_client_business_v2/spec_v*/
-collector_client_raw_msg/build_*/
-collector_client_raw_msg/dist_*/
-collector_client_raw_msg/spec_*/
-collector_client_raw_msg/data/
 
 # Runtime data
 data/

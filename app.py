@@ -35,7 +35,6 @@ WAYBILL_REMOTE_STATE = {
     "batch_id": "",
     "started_at": "",
     "stopped_at": "",
-    "capture_mode": "raw_full",
     "last_raw_file": "",
     "last_raw_count": 0,
     "last_processed_file": "",
@@ -45,23 +44,6 @@ WAYBILL_REMOTE_STATE = {
 }
 WAYBILL_COLLECTOR_ONLINE_SECONDS = 20
 WAYBILL_STOP_WAIT_SECONDS = 8
-WAYBILL_CAPTURE_MODES = {
-    "raw_full": {
-        "value": "raw_full",
-        "label": "原始全量采集",
-        "description": "监听期间的组件 task.msg 原样上传，不解析、不提取。",
-    },
-    "filtered": {
-        "value": "filtered",
-        "label": "规则过滤采集",
-        "description": "监听期间先提取可用打印文字，再上传给系统解析。",
-    },
-}
-DEFAULT_WAYBILL_CAPTURE_MODE = "raw_full"
-DEFAULT_WAYBILL_CAPTURE_RULES = {
-    "include_keywords": [],
-    "exclude_keywords": [],
-}
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(get_output_dir(), "_web_uploads")
@@ -132,57 +114,6 @@ def current_time_text():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def normalize_waybill_capture_mode(value):
-    text = str(value or "").strip()
-    aliases = {
-        "raw": "raw_full",
-        "raw_msg": "raw_full",
-        "raw_component_msg": "raw_full",
-        "原始": "raw_full",
-        "原始全量": "raw_full",
-        "原始全量采集": "raw_full",
-        "full": "raw_full",
-        "all": "raw_full",
-        "filter": "filtered",
-        "filtered": "filtered",
-        "extract": "filtered",
-        "text": "filtered",
-        "规则": "filtered",
-        "规则过滤": "filtered",
-        "规则过滤采集": "filtered",
-    }
-    normalized = aliases.get(text, text)
-    return normalized if normalized in WAYBILL_CAPTURE_MODES else DEFAULT_WAYBILL_CAPTURE_MODE
-
-
-def waybill_capture_mode_label(value):
-    mode = normalize_waybill_capture_mode(value)
-    return WAYBILL_CAPTURE_MODES[mode]["label"]
-
-
-def normalize_waybill_capture_rules(value):
-    if not isinstance(value, dict):
-        value = {}
-    result = dict(DEFAULT_WAYBILL_CAPTURE_RULES)
-    for key in ("include_keywords", "exclude_keywords"):
-        raw = value.get(key, [])
-        if isinstance(raw, str):
-            raw = [raw]
-        if not isinstance(raw, list):
-            raw = []
-        seen = set()
-        cleaned = []
-        for item in raw:
-            for part in str(item or "").replace("\n", "/").replace("，", ",").replace("、", ",").replace("；", ",").replace(";", ",").split("/"):
-                for sub in part.split(","):
-                    text = sub.strip()
-                    if text and text not in seen:
-                        seen.add(text)
-                        cleaned.append(text)
-        result[key] = cleaned
-    return result
-
-
 def parse_time_text(value):
     text = str(value or "").strip()
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
@@ -200,56 +131,6 @@ def collector_is_online(collector, max_age_seconds=WAYBILL_COLLECTOR_ONLINE_SECO
     return (datetime.now() - seen).total_seconds() <= max_age_seconds
 
 
-def waybill_collector_physical_key(row):
-    hostname = str(row.get("hostname") or row.get("machine_name") or "").strip().lower()
-    username = str(row.get("username") or "").strip().lower()
-    if hostname and username:
-        return f"{hostname}|{username}"
-    if hostname:
-        return f"host|{hostname}"
-    label = str(row.get("machine_label") or "").strip().lower()
-    if label:
-        return f"label|{label}"
-    return f"client|{row.get('client_id') or ''}"
-
-
-def waybill_collector_rank(row):
-    seen = parse_time_text(row.get("last_seen")) or datetime.min
-    return (
-        1 if row.get("online") else 0,
-        1 if str(row.get("client_id") or "").startswith("business-v2-") else 0,
-        seen,
-    )
-
-
-def merge_waybill_collector_rows(rows):
-    grouped = {}
-    for row in rows:
-        key = waybill_collector_physical_key(row)
-        grouped.setdefault(key, []).append(row)
-
-    merged_rows = []
-    for group in grouped.values():
-        selected = max(group, key=waybill_collector_rank)
-        merged = dict(selected)
-        uploaded_rows = [row for row in group if row.get("uploaded")]
-        if uploaded_rows:
-            merged["uploaded"] = True
-            merged["uploaded_records"] = sum(int(row.get("uploaded_records") or 0) for row in uploaded_rows)
-            merged["records_found"] = sum(int(row.get("records_found") or 0) for row in uploaded_rows)
-            uploaded_at = sorted([str(row.get("uploaded_at") or "") for row in uploaded_rows if row.get("uploaded_at")])
-            merged["uploaded_at"] = uploaded_at[-1] if uploaded_at else ""
-        merged_rows.append(merged)
-
-    return sorted(
-        merged_rows,
-        key=lambda row: (
-            0 if row.get("online") else 1,
-            str(row.get("machine_label") or row.get("machine_name") or row.get("client_id") or ""),
-        ),
-    )
-
-
 def public_waybill_collectors():
     uploads = WAYBILL_REMOTE_STATE.get("uploads", {})
     collector_items = WAYBILL_REMOTE_STATE.get("collectors", {})
@@ -259,8 +140,6 @@ def public_waybill_collectors():
         item = collector_items.get(client_id, {})
         upload = uploads.get(client_id, {})
         components = item.get("components") if isinstance(item.get("components"), list) else []
-        preferred_mode = normalize_waybill_capture_mode(item.get("preferred_capture_mode") or upload.get("capture_mode"))
-        active_mode = normalize_waybill_capture_mode(item.get("active_capture_mode") or upload.get("capture_mode") or preferred_mode)
         rows.append(
             {
                 "client_id": client_id,
@@ -278,15 +157,9 @@ def public_waybill_collectors():
                 "uploaded_records": len(upload.get("records", [])) if upload else 0,
                 "uploaded_at": upload.get("uploaded_at") or "",
                 "records_found": upload.get("records_found", 0) if upload else 0,
-                "preferred_capture_mode": preferred_mode,
-                "preferred_capture_mode_label": waybill_capture_mode_label(preferred_mode),
-                "active_capture_mode": active_mode,
-                "active_capture_mode_label": waybill_capture_mode_label(active_mode),
-                "capture_mode": normalize_waybill_capture_mode(upload.get("capture_mode") or active_mode),
-                "capture_mode_label": waybill_capture_mode_label(upload.get("capture_mode") or active_mode),
             }
         )
-    return merge_waybill_collector_rows(rows)
+    return rows
 
 
 def online_waybill_collector_ids():
@@ -412,22 +285,12 @@ def waybill_status_payload():
     last_raw_count = WAYBILL_REMOTE_STATE.get("last_raw_count", 0) or waybill_raw_row_count(last_raw_file)
     last_processed_file = latest_waybill_processed_file()
     last_processed_count = WAYBILL_REMOTE_STATE.get("last_processed_count", 0) or waybill_raw_row_count(last_processed_file)
-    system, _ = get_current_system()
-    capture_rules = normalize_waybill_capture_rules(system.get("waybill_capture_rules", {}) if isinstance(system, dict) else {})
     return {
         "ok": True,
         "web_version": WEB_VERSION,
         "active": status_text in {"running", "stopping"},
         "status": status_text,
         "batch_id": WAYBILL_REMOTE_STATE.get("batch_id", ""),
-        "capture_mode": normalize_waybill_capture_mode(WAYBILL_REMOTE_STATE.get("capture_mode")),
-        "capture_mode_label": waybill_capture_mode_label(WAYBILL_REMOTE_STATE.get("capture_mode")),
-        "capture_modes": list(WAYBILL_CAPTURE_MODES.values()),
-        "capture_rules": capture_rules,
-        "capture_rule_counts": {
-            "include_keywords": len(capture_rules.get("include_keywords", [])),
-            "exclude_keywords": len(capture_rules.get("exclude_keywords", [])),
-        },
         "started_at": WAYBILL_REMOTE_STATE.get("started_at", ""),
         "stopped_at": WAYBILL_REMOTE_STATE.get("stopped_at", ""),
         "last_raw_file": last_raw_file,
@@ -609,12 +472,10 @@ def api_waybill_status():
 
 
 @app.post("/api/waybill/start")
-def api_waybill_start(payload: Optional[dict] = None):
-    requested_mode = normalize_waybill_capture_mode((payload or {}).get("capture_mode") if isinstance(payload, dict) else "")
+def api_waybill_start():
     batch_id = f"WB{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}"
     WAYBILL_REMOTE_STATE["status"] = "running"
     WAYBILL_REMOTE_STATE["batch_id"] = batch_id
-    WAYBILL_REMOTE_STATE["capture_mode"] = requested_mode
     WAYBILL_REMOTE_STATE["started_at"] = current_time_text()
     WAYBILL_REMOTE_STATE["stopped_at"] = ""
     WAYBILL_REMOTE_STATE["last_raw_file"] = ""
@@ -671,9 +532,6 @@ def api_waybill_agent_poll(payload: dict):
         "username": str(payload.get("username") or ""),
         "platform": str(payload.get("platform") or ""),
         "active_batch_id": str(payload.get("active_batch_id") or ""),
-        "preferred_capture_mode": normalize_waybill_capture_mode(payload.get("preferred_capture_mode")),
-        "active_capture_mode": normalize_waybill_capture_mode(payload.get("active_capture_mode") or payload.get("preferred_capture_mode")),
-        "tool_version": str(payload.get("tool_version") or ""),
         "components": payload.get("components") if isinstance(payload.get("components"), list) else [],
         "last_seen": current_time_text(),
     }
@@ -688,8 +546,6 @@ def api_waybill_agent_poll(payload: dict):
     else:
         command = "idle"
     system, _ = get_current_system()
-    capture_mode = normalize_waybill_capture_mode(WAYBILL_REMOTE_STATE.get("capture_mode"))
-    capture_rules = normalize_waybill_capture_rules(system.get("waybill_capture_rules", {}) if isinstance(system, dict) else {})
 
     return {
         "ok": True,
@@ -697,10 +553,6 @@ def api_waybill_agent_poll(payload: dict):
         "command": command,
         "batch_id": batch_id,
         "status": status_text,
-        "capture_mode": capture_mode,
-        "capture_mode_label": waybill_capture_mode_label(capture_mode),
-        "capture_modes": list(WAYBILL_CAPTURE_MODES.values()),
-        "capture_rules": capture_rules,
         "recognition_mode": "server",
         "server_rule_count": len(system.get("category_rules", []) if isinstance(system, dict) else []),
         "poll_interval_seconds": 2,
@@ -739,11 +591,6 @@ def api_waybill_agent_upload(payload: dict):
         "machine_label": machine_label,
         "hostname": str(payload.get("hostname") or ""),
         "username": str(payload.get("username") or ""),
-        "capture_mode": normalize_waybill_capture_mode(payload.get("capture_mode") or WAYBILL_REMOTE_STATE.get("capture_mode")),
-        "capture_mode_label": waybill_capture_mode_label(payload.get("capture_mode") or WAYBILL_REMOTE_STATE.get("capture_mode")),
-        "upload_mode": str(payload.get("upload_mode") or ""),
-        "capture_mode_source": str(payload.get("capture_mode_source") or ""),
-        "records_scanned": int(payload.get("records_scanned") or 0),
         "uploaded_at": current_time_text(),
         "records_found": int(payload.get("records_found") or len(records)),
         "records": records,
