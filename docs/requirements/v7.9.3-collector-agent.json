@@ -1,0 +1,591 @@
+{
+  "task_title": "v7.9.3 官方业务机采集助手重构",
+  "task_version": "7.9.3",
+  "task_priority": "high",
+  "repository": "Ndlg/order-management-system",
+  "supersedes_previous_requirements": {
+    "replace_old_issue_body": true,
+    "old_issue_number": 1,
+    "deprecated_requirements": [
+      "取消全量采集 / 筛选采集模式区分",
+      "取消客户端识别面单模式",
+      "取消客户端筛选逻辑",
+      "取消 legacy 独立采集客户端方案"
+    ]
+  },
+  "core_business_goal": "剔除旧的 legacy 业务机采集客户端，重构为订单整理系统官方配套业务机采集助手 OrderCollectorAgent。该工具部署在业务机上，只负责读取本机打印组件数据并完整回传面单原始信息，不做识别、不做筛选、不丢任何任务ID。",
+  "collector_agent_positioning": {
+    "official_name": "订单整理系统 - 业务机采集助手",
+    "internal_name": "OrderCollectorAgent",
+    "source_position": "源码属于订单整理系统内置插件体系，放入 src/plugins/collector_agent/",
+    "runtime_position": "运行时是发给业务机使用的独立轻量 EXE / 托盘程序 / 后台采集服务",
+    "business_position": "订单整理系统官方配套采集端，不是临时脚本，不是 legacy 工具，不是完整订单整理客户端",
+    "relationship_with_main_system": "与订单整理系统同仓库、同版本体系、同发布规范，但单独构建为业务机运行端",
+    "why_standalone_exe_is_needed": "因为业务机采集助手需要读取业务机本地打印组件数据库，Web 页面无法直接稳定读取业务机本机程序目录",
+    "not_allowed_positioning": [
+      "不得继续叫 legacy",
+      "不得放在 scripts/collector_client_legacy/",
+      "不得作为临时脚本散落",
+      "不得把客户机工具做成完整订单整理系统",
+      "不得把采集逻辑只做在 Web 前端"
+    ]
+  },
+  "version_lifecycle_policy": {
+    "general_rule": "从 v7.9.3 开始，每次订单整理系统发布新版本时，都必须检查并声明业务机采集助手的版本状态。",
+    "release_artifact_rule": "每个版本目录 versions/vX.Y.Z/ 必须包含主系统产物信息和采集助手产物信息。",
+    "artifact_paths": {
+      "main_system_bin": "versions/vX.Y.Z/bin/",
+      "collector_agent_zip": "versions/vX.Y.Z/bin/OrderCollectorAgent_vX.Y.Z.zip",
+      "collector_agent_exe": "versions/vX.Y.Z/bin/OrderCollectorAgent_vX.Y.Z.exe",
+      "release_manifest": "versions/vX.Y.Z/release_manifest.json",
+      "test_report": "versions/vX.Y.Z/tests/report.log"
+    },
+    "when_agent_code_changes": [
+      "必须更新 OrderCollectorAgent 版本号",
+      "必须重新构建业务机采集助手 EXE",
+      "必须执行采集助手专项测试",
+      "必须在版本说明中写明业务机是否需要升级"
+    ],
+    "when_agent_code_does_not_change": [
+      "不强制重打业务机 EXE",
+      "release_manifest.json 中必须记录本版本兼容的 agent 版本",
+      "Web 后端必须能识别旧 agent 是否兼容",
+      "版本说明中明确写：业务机采集助手无需升级，继续使用指定兼容版本"
+    ],
+    "protocol_compatibility": {
+      "required_fields_from_agent": [
+        "agent_version",
+        "protocol_version",
+        "client_id",
+        "machine_name",
+        "machine_label",
+        "component_status",
+        "last_seen"
+      ],
+      "server_response_fields": [
+        "server_version",
+        "protocol_version",
+        "min_supported_agent_version",
+        "latest_agent_version",
+        "upgrade_required",
+        "upgrade_message",
+        "download_url"
+      ],
+      "rule": "只要 Web 接口协议或上传字段发生不兼容变化，必须提升 protocol_version，并提示业务机升级采集助手。"
+    },
+    "upgrade_policy": {
+      "default": "不自动强制升级业务机工具，只在 Web 管理端提示版本状态。",
+      "force_upgrade_condition": [
+        "上传协议不兼容",
+        "存在严重漏采风险",
+        "旧版本无法识别任务ID",
+        "旧版本存在数据丢失缺陷"
+      ],
+      "web_ui_requirement": "业务机管理页面必须显示每台业务机 agent_version、protocol_version、是否需要升级、最新安装包下载入口。"
+    }
+  },
+  "phase_1_remove_legacy_client": {
+    "objective": "彻底剔除旧的独立采集客户端，避免新旧方案混用。",
+    "remove_paths": [
+      "scripts/collector_client_legacy/"
+    ],
+    "remove_legacy_files_include": [
+      "business_waybill_service.py",
+      "business_waybill_service.json",
+      "build_waybill_service.py",
+      "启动业务机面单监控服务.bat",
+      "安装业务机面单监控服务-开机自启.bat",
+      "卸载业务机面单监控服务-开机自启.bat",
+      "查看业务机面单监控服务日志.bat",
+      "业务机面单监控服务说明.md"
+    ],
+    "cleanup_requirements": [
+      "检查 scripts/build_version.py，确保不再引用 collector_client_legacy",
+      "检查 scripts/build_qt_windows.py，确保不再引用 collector_client_legacy",
+      "检查 docs/README.md、docs/project_rules.md、docs/version_log.md，删除或改写 legacy 描述",
+      "检查 .gitignore，移除 legacy 专属构建目录规则，保留通用 tmp 和 versions 规则",
+      "不得留下 legacy_backup、old_collector、collector_client_legacy_old 之类目录"
+    ],
+    "acceptance": [
+      "仓库中不存在 scripts/collector_client_legacy/",
+      "构建流程不再读取 legacy 客户端",
+      "文档中不再建议客户使用 legacy 独立服务",
+      "系统主流程、Web 服务、订单整理功能不受删除影响"
+    ]
+  },
+  "phase_2_create_official_collector_agent_plugin": {
+    "objective": "新增官方业务机采集助手源码模块，统一纳入系统插件体系。",
+    "target_directory": "src/plugins/collector_agent/",
+    "directory_structure": {
+      "src/plugins/collector_agent/__init__.py": "插件包入口",
+      "src/plugins/collector_agent/agent_app.py": "客户机工具主入口，负责启动托盘界面和后台任务",
+      "src/plugins/collector_agent/agent_service.py": "后台采集服务，负责轮询、读取、上传、重试",
+      "src/plugins/collector_agent/agent_config.py": "本地配置管理，保存服务器地址、绑定信息、业务机名称",
+      "src/plugins/collector_agent/agent_auth.py": "业务机绑定、token 保存、鉴权请求",
+      "src/plugins/collector_agent/agent_client.py": "Web API 客户端",
+      "src/plugins/collector_agent/agent_db_reader.py": "打印组件数据库读取逻辑",
+      "src/plugins/collector_agent/agent_models.py": "数据模型和上传字段定义",
+      "src/plugins/collector_agent/agent_logger.py": "日志管理",
+      "src/plugins/collector_agent/agent_storage.py": "本地缓存、游标、待上传队列",
+      "src/plugins/collector_agent/agent_tray.py": "托盘菜单和状态展示",
+      "src/plugins/collector_agent/agent_ui.py": "极简主界面",
+      "src/plugins/collector_agent/tests/": "采集助手专项测试"
+    },
+    "source_rules": [
+      "src/ 根目录不得新增散落业务 .py 文件",
+      "采集助手源码必须集中在 src/plugins/collector_agent/",
+      "共用逻辑可复用 src/core/waybill_collector_reader.py，但必须消除 legacy 依赖",
+      "不得复制一份旧客户端改名后继续使用",
+      "不得引入订单整理、Excel 导入导出、鞋款规则维护、图片管理等主系统功能"
+    ]
+  },
+  "phase_3_agent_business_features": {
+    "objective": "客户机工具只做采集回传，保持极简可靠。",
+    "required_features": [
+      "输入 Web 服务器地址",
+      "通过绑定码或账号完成业务机绑定",
+      "保存业务机名称 machine_name 和显示名称 machine_label",
+      "启动后自动连接 Web 后端",
+      "定时轮询 Web 获取 start、stop、idle、upgrade 等指令",
+      "读取本机打印组件数据库",
+      "完整回传每个打印任务的原始信息",
+      "记录本地日志",
+      "上传失败时进入 pending_uploads 待重试队列",
+      "支持托盘运行",
+      "支持开机自启",
+      "支持查看日志",
+      "支持打开数据目录",
+      "支持立即检测组件状态",
+      "支持立即同步 Web 状态"
+    ],
+    "explicitly_removed_features": [
+      "不再区分全量采集和筛选采集",
+      "不做面单模式识别",
+      "不做订单字段识别",
+      "不做鞋款、规格、尺码、数量、备注解析",
+      "不在客户机生成整理 Excel",
+      "不在客户机维护鞋款规则",
+      "不在客户机维护图片关系"
+    ],
+    "ui_requirement": {
+      "main_window_title": "订单整理系统 - 业务机采集助手 v7.9.3",
+      "main_window_fields": [
+        "连接状态",
+        "服务器地址",
+        "绑定业务机",
+        "登录账号或绑定状态",
+        "打印组件状态",
+        "当前批次",
+        "当前状态",
+        "最近上传时间",
+        "最近上传条数",
+        "agent_version",
+        "protocol_version"
+      ],
+      "main_window_buttons": [
+        "连接/重新绑定",
+        "立即检测",
+        "同步状态",
+        "查看日志",
+        "打开数据目录",
+        "退出"
+      ],
+      "tray_menu_items": [
+        "当前状态",
+        "当前批次",
+        "最近上传",
+        "打开主界面",
+        "立即同步",
+        "查看日志",
+        "打开数据目录",
+        "退出"
+      ],
+      "status_colors": {
+        "green": "已连接且组件正常",
+        "yellow": "已连接但未发现打印组件或有待上传记录",
+        "red": "未连接 Web 或上传失败",
+        "gray": "服务未启动"
+      }
+    },
+    "installation_layout": {
+      "program_dir": "C:\\Program Files\\OrderSystemCollector\\",
+      "data_dir": "C:\\ProgramData\\OrderSystemCollector\\",
+      "config_dir": "C:\\ProgramData\\OrderSystemCollector\\config\\",
+      "logs_dir": "C:\\ProgramData\\OrderSystemCollector\\logs\\",
+      "cache_dir": "C:\\ProgramData\\OrderSystemCollector\\cache\\",
+      "pending_uploads_dir": "C:\\ProgramData\\OrderSystemCollector\\pending_uploads\\"
+    }
+  },
+  "phase_4_no_task_id_loss_rule": {
+    "objective": "确保不漏掉任何打印任务ID，这是本版本最高优先级验收项。",
+    "hard_rules": [
+      "不得因为打印文本为空而丢弃任务",
+      "不得因为 JSON 解析失败而丢弃任务",
+      "不得因为 printXML 解析失败而丢弃任务",
+      "不得因为 document 为空而丢弃任务",
+      "不得因为文本重复而丢弃任务",
+      "不得仅按打印信息文本去重",
+      "不得只上传识别成功的记录",
+      "不得只上传有商品信息的记录",
+      "不得覆盖同 task_id 下的多条 document 记录"
+    ],
+    "minimum_record_guarantee": "打印组件数据库 task 表中的每一行 rowid，只要进入本次批次范围，至少必须生成一条上传记录。",
+    "dedupe_rule": {
+      "allowed": true,
+      "dedupe_key": [
+        "component_db_id",
+        "component_rowid",
+        "task_id",
+        "document_id",
+        "source_record_index"
+      ],
+      "forbidden_dedupe_key": [
+        "print_text_raw",
+        "normalized_print_text",
+        "task_id_only",
+        "document_id_only"
+      ],
+      "rule": "允许防止重复上传同一数据库行，但禁止因为文本相同、task_id 相同或解析结果相同而合并掉不同 rowid。"
+    },
+    "cursor_rule": {
+      "storage": "本地保存每个 component_db_id 的 last_uploaded_rowid 和 pending 状态",
+      "batch_start": "开始批次时记录每个组件当前最大 rowid 作为 baseline",
+      "batch_stop": "结束批次时上传 rowid 大于 baseline 的所有任务行",
+      "offline_case": "如果 stop 时无法连接 Web，必须把本次待上传记录写入 pending_uploads，恢复连接后继续上传",
+      "confirmation": "只有 Web 后端确认 accepted 后，才允许更新 last_uploaded_rowid 或清理 pending 文件"
+    },
+    "raw_record_fields_required": [
+      "client_id",
+      "machine_name",
+      "machine_label",
+      "agent_version",
+      "protocol_version",
+      "batch_id",
+      "component_name",
+      "component_db_id",
+      "component_db_path",
+      "component_rowid",
+      "task_id",
+      "document_id",
+      "task_time",
+      "source_record_index",
+      "raw_msg_json",
+      "raw_document_json",
+      "print_text_raw",
+      "extract_status",
+      "created_at"
+    ],
+    "fallback_behavior": [
+      {
+        "case": "msg JSON 解析失败",
+        "required_upload": "上传原始 msg 字符串到 raw_msg_json 或 raw_error_text，task_id 使用数据库字段 taskID，extract_status=raw_json_parse_failed"
+      },
+      {
+        "case": "documents 为空",
+        "required_upload": "仍上传一条记录，保留完整 payload，extract_status=no_documents"
+      },
+      {
+        "case": "printXML 无法解析",
+        "required_upload": "仍上传完整 raw_document_json，extract_status=print_xml_parse_failed"
+      },
+      {
+        "case": "没有提取到任何文字",
+        "required_upload": "仍上传任务记录，print_text_raw 使用占位提示，raw_document_json 保存原始 document"
+      }
+    ]
+  },
+  "phase_5_web_backend_interfaces": {
+    "objective": "Web 后端作为业务机绑定、轮询、上传、版本管理和原文查看中心。",
+    "new_or_reworked_interfaces": [
+      {
+        "method": "POST",
+        "path": "/api/collector/bind-code",
+        "purpose": "Web 管理端生成业务机绑定码",
+        "caller": "web_admin"
+      },
+      {
+        "method": "POST",
+        "path": "/api/collector/bind",
+        "purpose": "业务机工具使用绑定码绑定 Web 后端，获取 agent_token",
+        "caller": "collector_agent"
+      },
+      {
+        "method": "POST",
+        "path": "/api/collector/poll",
+        "purpose": "业务机工具轮询 Web，汇报在线状态、组件状态、版本信息，并获取 start/stop/idle/upgrade 指令",
+        "caller": "collector_agent"
+      },
+      {
+        "method": "POST",
+        "path": "/api/collector/upload",
+        "purpose": "业务机工具上传批次打印任务原文",
+        "caller": "collector_agent"
+      },
+      {
+        "method": "GET",
+        "path": "/api/collector/agents",
+        "purpose": "Web 查询业务机列表、在线状态、版本、最近上传",
+        "caller": "web_ui"
+      },
+      {
+        "method": "GET",
+        "path": "/api/collector/records",
+        "purpose": "Web 查询上传原文记录",
+        "caller": "web_ui"
+      },
+      {
+        "method": "GET",
+        "path": "/api/collector/version-info",
+        "purpose": "业务机工具检查当前服务端版本、最低兼容版本、最新下载地址",
+        "caller": "collector_agent"
+      }
+    ],
+    "auth_rule": [
+      "绑定成功后生成 agent_token",
+      "agent_token 保存在客户机 config 目录",
+      "poll 和 upload 必须携带 token",
+      "服务端校验 token 后才能接受上传",
+      "不得匿名上传"
+    ],
+    "compatibility_with_existing_waybill_api": [
+      "现有 /api/waybill/start 和 /api/waybill/stop 可继续作为 Web 用户操作入口",
+      "后端内部可以将 start/stop 状态转发给 /api/collector/poll",
+      "旧 /api/waybill/agent/poll 和 /api/waybill/agent/upload 如保留，必须标记为兼容层，不再作为新主接口",
+      "新代码优先使用 /api/collector/* 命名"
+    ]
+  },
+  "phase_6_web_ui_requirements": {
+    "objective": "Web 页面提供业务机管理、绑定、状态、原文查看和版本提示。",
+    "new_pages_or_sections": [
+      "业务机采集管理",
+      "业务机绑定码生成",
+      "业务机详情",
+      "打印原文记录查看",
+      "采集助手版本下载提示"
+    ],
+    "agent_list_columns": [
+      "业务机名称",
+      "在线状态",
+      "主机名",
+      "Windows 用户",
+      "打印组件状态",
+      "agent_version",
+      "protocol_version",
+      "是否需要升级",
+      "最近上传时间",
+      "最近上传条数"
+    ],
+    "raw_record_view_fields": [
+      "批次号",
+      "业务机",
+      "组件名称",
+      "component_rowid",
+      "task_id",
+      "document_id",
+      "task_time",
+      "extract_status",
+      "print_text_raw",
+      "raw_msg_json",
+      "raw_document_json",
+      "上传时间"
+    ],
+    "ui_rules": [
+      "打印原文区域必须支持复制",
+      "超长原文必须使用滚动区域或弹窗，不能撑爆页面",
+      "空原文显示明确占位提示",
+      "异常记录必须可查看 raw_msg_json 或 raw_document_json",
+      "业务机离线时显示最近在线时间",
+      "agent 版本过旧时显示升级提示和下载入口"
+    ]
+  },
+  "phase_7_storage_and_data_model": {
+    "objective": "后端必须持久化采集原文，不能只保存在内存。",
+    "preferred_storage": "按项目现有数据存储规范实现。如果当前没有数据库迁移体系，可先使用 data/ 下的结构化 JSONL 或 SQLite，但必须集中管理。",
+    "recommended_tables_or_files": [
+      "collector_agents",
+      "collector_batches",
+      "collector_raw_records",
+      "collector_upload_logs"
+    ],
+    "collector_agents_fields": [
+      "client_id",
+      "machine_name",
+      "machine_label",
+      "hostname",
+      "username",
+      "platform",
+      "agent_version",
+      "protocol_version",
+      "token_hash",
+      "last_seen",
+      "created_at",
+      "updated_at"
+    ],
+    "collector_raw_records_fields": [
+      "id",
+      "batch_id",
+      "client_id",
+      "machine_name",
+      "machine_label",
+      "component_name",
+      "component_db_id",
+      "component_db_path",
+      "component_rowid",
+      "task_id",
+      "document_id",
+      "task_time",
+      "source_record_index",
+      "raw_msg_json",
+      "raw_document_json",
+      "print_text_raw",
+      "extract_status",
+      "raw_hash",
+      "agent_version",
+      "protocol_version",
+      "created_at"
+    ],
+    "persistence_rules": [
+      "不得只保存处理后的打印信息",
+      "必须保存足以追溯原始任务的 raw_msg_json 或 raw_document_json",
+      "必须能按 task_id 查询",
+      "必须能按 batch_id 查询",
+      "必须能按业务机查询",
+      "必须能按 component_rowid 排查漏采"
+    ]
+  },
+  "phase_8_build_and_release": {
+    "objective": "规范构建业务机采集助手，纳入版本目录，不污染源码目录。",
+    "required_build_scripts": [
+      "scripts/build_collector_agent.py",
+      "scripts/build_version.py"
+    ],
+    "build_version_update": [
+      "scripts/build_version.py 7.9.3 应生成主系统版本目录",
+      "如传入 --build-agent，应构建 OrderCollectorAgent_v7.9.3.exe",
+      "如 agent 本版本无变化，应在 release_manifest.json 中记录 compatible_agent_version",
+      "构建日志写入 versions/v7.9.3/logs/",
+      "测试报告写入 versions/v7.9.3/tests/report.log"
+    ],
+    "release_manifest_required_fields": [
+      "system_version",
+      "collector_agent_version",
+      "collector_protocol_version",
+      "min_supported_agent_version",
+      "agent_build_required",
+      "agent_artifact",
+      "agent_upgrade_required_for_existing_users",
+      "release_time"
+    ],
+    "artifact_rules": [
+      "业务机只发 OrderCollectorAgent_vX.Y.Z.zip 或 OrderCollectorAgentSetup_vX.Y.Z.exe",
+      "不得把源码目录发给业务机",
+      "不得把 data/ 生产数据打包进业务机工具",
+      "不得把测试数据打包进业务机工具",
+      "不得把构建中间文件放入 src/",
+      "不得在根目录生成临时文件"
+    ]
+  },
+  "phase_9_tests": {
+    "objective": "重点验证不漏任务ID、原文完整、上传可靠、版本兼容。",
+    "unit_tests": [
+      "读取 CNPrintTool 示例 print.db，确认每个 task rowid 至少生成一条记录",
+      "读取 CloudPrintClient 示例 print.db，确认每个 task rowid 至少生成一条记录",
+      "JSON 解析失败时仍生成上传记录",
+      "documents 为空时仍生成上传记录",
+      "printXML 解析失败时仍生成上传记录",
+      "空打印文本时仍生成上传记录",
+      "相同 print_text_raw 的不同 rowid 不被合并",
+      "相同 task_id 的不同 rowid 不被合并",
+      "pending_uploads 在上传失败时写入，成功后清理",
+      "agent_config 不在程序目录乱写文件"
+    ],
+    "api_tests": [
+      "POST /api/collector/bind-code 正常生成绑定码",
+      "POST /api/collector/bind 使用有效绑定码成功绑定",
+      "POST /api/collector/poll 返回 command、batch_id、version-info",
+      "POST /api/collector/upload 接收完整 records",
+      "无 token 上传被拒绝",
+      "错误 batch_id 上传被拒绝或明确提示",
+      "重复上传同一 component_rowid 不产生重复业务记录，但不得误删不同 rowid"
+    ],
+    "regression_tests": [
+      "旧的 Web 开始监听 / 结束监听流程仍可触发业务机采集助手上传",
+      "上传后的原文 Excel 或原文记录仍可进入订单系统后续解析流程",
+      "主系统订单整理、模板、图片、档口规则不受影响",
+      "版本目录生成后没有垃圾文件",
+      "release_manifest.json 包含采集助手版本状态"
+    ],
+    "test_data_location": [
+      "data/reference/collector_samples/",
+      "data/input/collector_samples/"
+    ],
+    "test_output_location": "versions/v7.9.3/tests/report.log"
+  },
+  "phase_10_documentation": {
+    "objective": "更新文档，明确业务机采集助手地位和版本更新策略。",
+    "docs_to_create_or_update": [
+      "docs/requirements/v7.9.3-collector-agent.md",
+      "docs/collector_agent_user_guide.md",
+      "docs/collector_agent_release_policy.md",
+      "docs/project_rules.md",
+      "docs/version_log.md",
+      "docs/README.md"
+    ],
+    "documentation_must_explain": [
+      "业务机采集助手是什么",
+      "为什么需要安装在业务机",
+      "如何生成绑定码",
+      "业务机如何绑定 Web",
+      "如何查看在线状态",
+      "如何查看打印原文",
+      "如何升级业务机采集助手",
+      "每次主系统升级时如何判断业务机是否需要升级",
+      "旧 legacy 客户端已废弃，不得继续部署"
+    ]
+  },
+  "global_directory_rules": {
+    "must_follow_existing_project_rules": true,
+    "no_garbage_files": [
+      "不得新增 new_xxx.py",
+      "不得新增 xxx_old.py",
+      "不得新增 xxx_backup.py",
+      "不得新增 test123.py",
+      "不得在根目录生成临时脚本",
+      "不得在根目录生成构建产物",
+      "不得把 exe 放入 src/",
+      "不得把日志放入 src/"
+    ],
+    "allowed_runtime_dirs": [
+      "tmp/",
+      "versions/vX.Y.Z/",
+      "data/input/",
+      "data/reference/",
+      "data/output/"
+    ],
+    "client_machine_runtime_dirs": [
+      "C:\\ProgramData\\OrderSystemCollector\\config\\",
+      "C:\\ProgramData\\OrderSystemCollector\\logs\\",
+      "C:\\ProgramData\\OrderSystemCollector\\cache\\",
+      "C:\\ProgramData\\OrderSystemCollector\\pending_uploads\\"
+    ]
+  },
+  "final_acceptance_criteria": [
+    "scripts/collector_client_legacy/ 已彻底删除",
+    "新增 src/plugins/collector_agent/ 官方采集助手源码",
+    "可构建 OrderCollectorAgent_v7.9.3.exe 或 zip",
+    "业务机工具可通过绑定码或账号连接 Web",
+    "业务机工具可托盘运行",
+    "业务机工具可开机自启",
+    "业务机工具可读取 CNPrintTool / CloudPrintClient 打印组件数据",
+    "业务机工具不做识别、不做筛选、不区分采集模式",
+    "每个进入批次范围的 component_rowid 至少上传一条记录",
+    "任何 task_id 不得因为空文本、解析失败、重复文本而丢失",
+    "Web 可查看业务机在线状态、版本、组件状态、最近上传",
+    "Web 可查看打印原文、task_id、document_id、component_rowid",
+    "上传失败有本地 pending 队列，恢复后可重试",
+    "版本目录 versions/v7.9.3/ 中包含 release_manifest.json 和测试报告",
+    "文档明确采集助手是订单整理系统官方配套业务机采集端",
+    "文档明确以后每次版本发布都要声明采集助手是否需要升级",
+    "项目根目录无垃圾文件、无临时构建文件、无 legacy 残留"
+  ]
+}
