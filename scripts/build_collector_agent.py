@@ -38,6 +38,14 @@ def ensure_inside_tmp(path: Path) -> Path:
     return resolved
 
 
+def ensure_inside_project(path: Path) -> Path:
+    resolved = path.resolve()
+    root = PROJECT_ROOT.resolve()
+    if not (resolved == root or root in resolved.parents):
+        raise RuntimeError(f"refuse to operate outside project: {resolved}")
+    return resolved
+
+
 def remove_tree(path: Path) -> None:
     path = ensure_inside_tmp(path)
     if path.exists():
@@ -64,6 +72,41 @@ Get-Process | Where-Object {
         check=False,
     )
     time.sleep(0.5)
+
+
+def stop_project_processes_using(path: Path) -> None:
+    path = ensure_inside_project(path)
+    if os.name != "nt" or not path.exists():
+        return
+    script = r"""
+$target = [System.IO.Path]::GetFullPath($env:TARGET_DIR)
+Get-Process | Where-Object {
+  $_.Path -and [System.IO.Path]::GetFullPath($_.Path).StartsWith($target, [System.StringComparison]::OrdinalIgnoreCase)
+} | Stop-Process -Force
+"""
+    env = os.environ.copy()
+    env["TARGET_DIR"] = str(path)
+    subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    time.sleep(0.5)
+
+
+def copy_with_retry(source: Path, target: Path, attempts: int = 12) -> None:
+    last_error: Exception | None = None
+    for _ in range(attempts):
+        try:
+            shutil.copy2(source, target)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.5)
+    if last_error:
+        raise last_error
 
 
 def build_agent(version: str, keep_build: bool = False) -> Path:
@@ -128,8 +171,9 @@ def main() -> int:
     if args.output_dir:
         target_dir = Path(args.output_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
+        stop_project_processes_using(target_dir)
         target = target_dir / exe.name
-        shutil.copy2(exe, target)
+        copy_with_retry(exe, target)
         exe = target
     print(f"collector_agent_exe={exe}")
     return 0

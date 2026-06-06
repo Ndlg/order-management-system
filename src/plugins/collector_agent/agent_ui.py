@@ -17,7 +17,8 @@ class AgentWindow(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"{OFFICIAL_NAME} v{AGENT_VERSION}")
-        self.geometry("640x460")
+        self.geometry("680x560")
+        self.minsize(640, 520)
         self.resizable(True, True)
         self.config_data = load_config()
         self.service_thread: threading.Thread | None = None
@@ -28,9 +29,9 @@ class AgentWindow(tk.Tk):
         self.refresh_fields()
 
     def build(self) -> None:
-        pad = {"padx": 10, "pady": 6}
+        pad = {"padx": 10, "pady": 5}
         frame = tk.Frame(self)
-        frame.pack(fill="both", expand=True, padx=12, pady=12)
+        frame.pack(fill="both", expand=True, padx=12, pady=(12, 4))
 
         self.server_entry = self.row(frame, "服务器地址", 0)
         self.bind_entry = self.row(frame, "绑定码/账号", 1)
@@ -51,15 +52,26 @@ class AgentWindow(tk.Tk):
             tk.Label(frame, text=name, anchor="w", width=16).grid(row=index, column=0, sticky="w", **pad)
             tk.Label(frame, textvariable=var, anchor="w").grid(row=index, column=1, sticky="ew", **pad)
 
-        buttons = tk.Frame(frame)
-        buttons.grid(row=12, column=0, columnspan=2, sticky="ew", padx=10, pady=12)
-        tk.Button(buttons, text="连接/重新绑定", command=self.bind).pack(side="left", padx=4)
-        tk.Button(buttons, text="立即检测", command=self.check_components).pack(side="left", padx=4)
-        tk.Button(buttons, text="同步状态", command=self.sync_once).pack(side="left", padx=4)
-        tk.Button(buttons, text="查看日志", command=open_logs_dir).pack(side="left", padx=4)
-        tk.Button(buttons, text="打开数据目录", command=open_data_dir).pack(side="left", padx=4)
-        tk.Button(buttons, text="退出", command=self.destroy).pack(side="right", padx=4)
         frame.columnconfigure(1, weight=1)
+        self.build_actions()
+
+    def build_actions(self) -> None:
+        buttons = tk.Frame(self)
+        buttons.pack(fill="x", padx=20, pady=(4, 16))
+        items = [
+            ("连接/重新绑定", self.bind),
+            ("立即检测", self.check_components),
+            ("同步状态", self.sync_once),
+            ("查看日志", open_logs_dir),
+            ("打开数据目录", open_data_dir),
+            ("退出", self.destroy),
+        ]
+        for index, (text, command) in enumerate(items):
+            row, col = divmod(index, 3)
+            button = tk.Button(buttons, text=text, command=command, width=16)
+            button.grid(row=row, column=col, sticky="ew", padx=5, pady=4)
+        for col in range(3):
+            buttons.columnconfigure(col, weight=1)
 
     def row(self, frame: tk.Frame, label: str, row: int) -> tk.Entry:
         tk.Label(frame, text=label, anchor="w", width=16).grid(row=row, column=0, sticky="w", padx=10, pady=6)
