@@ -42,8 +42,7 @@ V7.9.3 将业务机采集端重构为官方配套工具 `OrderCollectorAgent`。
 
 采集助手主接口统一使用 `/api/collector/*`：
 
-- `POST /api/collector/bind-code`
-- `POST /api/collector/bind`
+- `POST /api/collector/register`
 - `POST /api/collector/poll`
 - `POST /api/collector/upload`
 - `GET /api/collector/agents`

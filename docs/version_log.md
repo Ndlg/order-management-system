@@ -30,7 +30,7 @@
 
 - 重构业务机采集端为官方 `OrderCollectorAgent`，源码放入 `src/plugins/collector_agent/`。
 - 删除旧独立采集客户端方案和旧采集模式代码。
-- 新增 `/api/collector/*` 绑定、轮询、上传、业务机列表、原文记录和版本接口。
+- 新增 `/api/collector/*` 上线注册、轮询、上传、业务机列表、原文记录和版本接口。
 - 采集助手不做识别、不做筛选，不区分采集模式。
 - 构建流程新增 `--build-agent` 和 `release_manifest.json`。
 ## v7.9.3 - 2026-06-07 01:53:57
@@ -51,3 +51,9 @@
 - 回归测试: 通过 (0)
 - 产物: OrderSystem_source_v7.9.3.zip, OrderCollectorAgent_v7.9.3.exe, OrderCollectorAgent_v7.9.3.zip, release_manifest.json
 - 说明: 采集助手改为无控制台 GUI，支持托盘常驻和自动重连。
+## v7.9.3 - 2026-06-07 02:35:27
+- 目录: `C:/Users/ndlgx/Documents/Projects/GitHub/Ndlg/order-management-system/versions/v7.9.3`
+- 拉取源码: skipped
+- 回归测试: 通过 (0)
+- 产物: OrderSystem_source_v7.9.3.zip, OrderCollectorAgent_v7.9.3.exe, OrderCollectorAgent_v7.9.3.zip, release_manifest.json
+- 说明: 采集助手取消旧手工配对流程，改为上线自动注册；EXE 使用正式程序图标。

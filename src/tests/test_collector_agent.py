@@ -94,7 +94,7 @@ class CollectorAgentTest(unittest.TestCase):
             self.assertEqual(len(duplicate_rows), 2)
             self.assertEqual({int(row["component_rowid"]) for row in duplicate_rows}, {6, 7})
 
-    def test_backend_bind_poll_upload_auth_and_dedupe_by_rowid(self) -> None:
+    def test_backend_register_poll_upload_auth_and_dedupe_by_rowid(self) -> None:
         with RuntimeEnv():
             from ui import app as web_app
 
@@ -112,10 +112,8 @@ class CollectorAgentTest(unittest.TestCase):
                     "last_processed_count": 0,
                 }
             )
-            bind_code = web_app.api_collector_bind_code({})["bind_code"]
-            bind = web_app.api_collector_bind(
+            registered = web_app.api_collector_register(
                 {
-                    "bind_code": bind_code,
                     "client_id": "agent-1",
                     "machine_name": "biz-01",
                     "machine_label": "业务机01",
@@ -123,8 +121,8 @@ class CollectorAgentTest(unittest.TestCase):
                     "protocol_version": PROTOCOL_VERSION,
                 }
             )
-            self.assertTrue(bind["ok"])
-            token = bind["agent_token"]
+            self.assertTrue(registered["ok"])
+            token = registered["agent_token"]
 
             web_app.api_waybill_start()
             poll = web_app.api_collector_poll(

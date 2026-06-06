@@ -43,8 +43,8 @@ class CollectorApiClient:
             return data
         raise CollectorApiError("response_must_be_object")
 
-    def bind(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.request("POST", "/api/collector/bind", payload)
+    def register(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.request("POST", "/api/collector/register", payload)
 
     def poll(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.request("POST", "/api/collector/poll", payload)

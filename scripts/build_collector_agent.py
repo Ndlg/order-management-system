@@ -16,6 +16,8 @@ SRC_ROOT = PROJECT_ROOT / "src"
 SCRIPT_ROOT = PROJECT_ROOT / "scripts"
 TMP_BUILD_ROOT = PROJECT_ROOT / "tmp" / "build"
 AGENT_ENTRY = SRC_ROOT / "plugins" / "collector_agent" / "agent_app.py"
+ASSET_ROOT = SRC_ROOT / "plugins" / "collector_agent" / "assets"
+AGENT_ICON = ASSET_ROOT / "collector_agent_icon.ico"
 
 
 def parse_args() -> argparse.Namespace:
@@ -109,6 +111,10 @@ def copy_with_retry(source: Path, target: Path, attempts: int = 12) -> None:
         raise last_error
 
 
+def add_data_arg(source: Path, target: str) -> str:
+    return f"{source}{os.pathsep}{target}"
+
+
 def build_agent(version: str, keep_build: bool = False) -> Path:
     version = normalized_version(version)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -134,6 +140,10 @@ def build_agent(version: str, keep_build: bool = False) -> Path:
         str(build),
         "--specpath",
         str(spec),
+        "--icon",
+        str(AGENT_ICON),
+        "--add-data",
+        add_data_arg(ASSET_ROOT, "plugins/collector_agent/assets"),
         "--paths",
         str(SRC_ROOT),
         "--name",
@@ -162,6 +172,8 @@ def build_agent(version: str, keep_build: bool = False) -> Path:
         "tkinter",
         str(AGENT_ENTRY),
     ]
+    if not AGENT_ICON.exists():
+        raise FileNotFoundError(f"collector agent icon missing: {AGENT_ICON}")
     print("RUN:", " ".join(command), flush=True)
     subprocess.run(command, cwd=PROJECT_ROOT, check=True)
 

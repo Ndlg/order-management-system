@@ -11,6 +11,18 @@ from typing import Callable
 from .agent_config import data_root, logs_dir
 
 
+def icon_path(name: str) -> Path:
+    candidates: list[Path] = []
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.append(Path(bundle_root) / "plugins" / "collector_agent" / "assets" / name)
+    candidates.append(Path(__file__).resolve().parent / "assets" / name)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 def open_data_dir() -> None:
     path = data_root()
     path.mkdir(parents=True, exist_ok=True)
@@ -128,6 +140,12 @@ class AgentTray:
     def _image(self):
         from PIL import Image, ImageDraw
 
+        source = icon_path("collector_agent_icon.png")
+        if source.exists():
+            try:
+                return Image.open(source).convert("RGBA")
+            except Exception:
+                pass
         image = Image.new("RGBA", (64, 64), (37, 99, 168, 255))
         draw = ImageDraw.Draw(image)
         draw.rounded_rectangle((6, 6, 58, 58), radius=12, fill=(22, 128, 96, 255))

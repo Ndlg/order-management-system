@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import secrets
 import uuid
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -77,10 +76,6 @@ def collector_data_dir() -> Path:
 
 def agents_path() -> Path:
     return collector_data_dir() / "collector_agents.json"
-
-
-def bind_codes_path() -> Path:
-    return collector_data_dir() / "collector_bind_codes.json"
 
 
 def raw_records_path() -> Path:
@@ -158,35 +153,6 @@ def save_agents(agents: dict[str, dict[str, Any]]) -> None:
     write_json_atomic(agents_path(), agents)
 
 
-def load_bind_codes() -> dict[str, dict[str, Any]]:
-    value = read_json(bind_codes_path(), {})
-    return value if isinstance(value, dict) else {}
-
-
-def save_bind_codes(codes: dict[str, dict[str, Any]]) -> None:
-    write_json_atomic(bind_codes_path(), codes)
-
-
-def create_bind_code(created_by: str = "web", expires_minutes: int = 30) -> dict[str, Any]:
-    codes = load_bind_codes()
-    now = datetime.now(timezone.utc)
-    for code, row in list(codes.items()):
-        expires_at = parse_time(row.get("expires_at"))
-        if row.get("used_at") or (expires_at and expires_at < now):
-            codes.pop(code, None)
-    code = secrets.token_hex(4).upper()
-    codes[code] = {
-        "bind_code": code,
-        "created_by": str(created_by or "web"),
-        "created_at": utc_now_text(),
-        "expires_at": (now + timedelta(minutes=max(1, expires_minutes))).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "used_at": "",
-        "used_by": "",
-    }
-    save_bind_codes(codes)
-    return dict(codes[code])
-
-
 def version_info(download_url: str = "") -> dict[str, Any]:
     return {
         "server_version": LATEST_AGENT_VERSION,
@@ -199,38 +165,11 @@ def version_info(download_url: str = "") -> dict[str, Any]:
     }
 
 
-def consume_bind_code(bind_code: str, client_id: str) -> tuple[bool, str]:
-    code = str(bind_code or "").strip().upper()
-    codes = load_bind_codes()
-    row = codes.get(code)
-    if not row:
-        return False, "bind_code_invalid"
-    expires_at = parse_time(row.get("expires_at"))
-    if row.get("used_at"):
-        return False, "bind_code_used"
-    if expires_at and expires_at < datetime.now(timezone.utc):
-        codes.pop(code, None)
-        save_bind_codes(codes)
-        return False, "bind_code_expired"
-    row["used_at"] = utc_now_text()
-    row["used_by"] = client_id
-    codes[code] = row
-    save_bind_codes(codes)
-    return True, ""
-
-
-def bind_agent(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+def register_agent(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     client_id = str(payload.get("client_id") or uuid.uuid4().hex).strip()
-    bind_code = str(payload.get("bind_code") or "").strip()
-    username = str(payload.get("username") or "").strip()
-    if bind_code:
-        ok, error = consume_bind_code(bind_code, client_id)
-        if not ok:
-            return None, error
-    elif not username:
-        return None, "bind_code_or_account_required"
-
-    token = secrets.token_urlsafe(32)
+    if not client_id:
+        return None, "client_id_required"
+    token = uuid.uuid4().hex + uuid.uuid4().hex
     now = utc_now_text()
     agents = load_agents()
     current = agents.get(client_id, {})
@@ -242,7 +181,7 @@ def bind_agent(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         "machine_name": machine_name,
         "machine_label": machine_label,
         "hostname": str(payload.get("hostname") or current.get("hostname") or ""),
-        "username": username or str(payload.get("windows_user") or current.get("username") or ""),
+        "username": str(payload.get("username") or payload.get("windows_user") or current.get("username") or ""),
         "platform": str(payload.get("platform") or current.get("platform") or ""),
         "agent_version": str(payload.get("agent_version") or current.get("agent_version") or ""),
         "protocol_version": str(payload.get("protocol_version") or current.get("protocol_version") or ""),

@@ -416,16 +416,9 @@ def get_current_system():
     return data, "default"
 
 
-@app.post("/api/collector/bind-code")
-def api_collector_bind_code(payload: dict | None = None):
-    payload = payload or {}
-    code = collector_agent_store.create_bind_code(created_by=str(payload.get("created_by") or "web"))
-    return {"ok": True, "web_version": WEB_VERSION, **code}
-
-
-@app.post("/api/collector/bind")
-def api_collector_bind(payload: dict):
-    result, error = collector_agent_store.bind_agent(payload)
+@app.post("/api/collector/register")
+def api_collector_register(payload: dict):
+    result, error = collector_agent_store.register_agent(payload)
     if error:
         return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": error}, status_code=400)
     return {"ok": True, "web_version": WEB_VERSION, **(result or {}), **collector_agent_store.version_info()}

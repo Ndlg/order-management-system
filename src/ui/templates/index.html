@@ -406,7 +406,7 @@
       margin-top: 4px;
     }
 
-    .collector-bind-row {
+    .collector-register-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -417,13 +417,13 @@
       border-top: 1px solid var(--line);
     }
 
-    .collector-bind-label {
+    .collector-register-label {
       font-size: 13px;
       font-weight: 800;
       color: var(--text);
     }
 
-    .collector-bind-code {
+    .collector-register-badge {
       display: inline-flex;
       align-items: center;
       min-height: 34px;
@@ -435,17 +435,7 @@
       letter-spacing: 0;
     }
 
-    .collector-bind-row button {
-      border: 0;
-      border-radius: 6px;
-      padding: 7px 10px;
-      background: var(--blue);
-      color: #fff;
-      font-weight: 800;
-      cursor: pointer;
-    }
-
-    .collector-bind-state {
+    .collector-register-state {
       color: var(--muted);
       font-size: 12px;
       overflow-wrap: anywhere;
@@ -744,13 +734,10 @@
                   <div class="monitor-title">业务机采集助手同步本次打印信息原文</div>
                   <div id="waybillDetail" class="monitor-detail">读取业务机监听状态中...</div>
                   <div id="waybillCollectors" class="collector-list" aria-live="polite"></div>
-                  <div class="collector-bind-row">
-                    <span class="collector-bind-label">业务机绑定码</span>
-                    <span class="collector-bind-code" id="collectorBindCode">未生成</span>
-                    <span>
-                      <button type="button" onclick="createCollectorBindCode()">生成绑定码</button>
-                    </span>
-                    <span id="collectorBindState" class="collector-bind-state">用于业务机采集助手连接本 Web 后端</span>
+                  <div class="collector-register-row">
+                    <span class="collector-register-label">业务机上线注册</span>
+                    <span class="collector-register-badge">自动</span>
+                    <span class="collector-register-state">采集助手填写服务器地址后会自动注册，并在此显示在线状态</span>
                   </div>
                   <div class="raw-record-box">
                     <div id="collectorRawRecords" class="raw-record-list" aria-live="polite"></div>
@@ -844,8 +831,6 @@ const waybillStart = document.getElementById('waybillStart');
 const waybillStop = document.getElementById('waybillStop');
 const waybillRawDownload = document.getElementById('waybillRawDownload');
 const waybillProcessedDownload = document.getElementById('waybillProcessedDownload');
-const collectorBindCode = document.getElementById('collectorBindCode');
-const collectorBindState = document.getElementById('collectorBindState');
 const collectorRawRecords = document.getElementById('collectorRawRecords');
 const collectorRawText = document.getElementById('collectorRawText');
 const collectorRawMeta = document.getElementById('collectorRawMeta');
@@ -960,23 +945,6 @@ function appendText(parent, className, text, tagName = 'div') {
   node.textContent = text;
   parent.appendChild(node);
   return node;
-}
-
-async function createCollectorBindCode() {
-  try {
-    const r = await fetch('/api/collector/bind-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ created_by: 'web' })
-    });
-    const d = await r.json();
-    if (!d.ok) throw new Error(d.error || '绑定码生成失败');
-    collectorBindCode.textContent = d.bind_code || '-';
-    collectorBindState.textContent = d.expires_at ? `有效期至 ${d.expires_at}` : '已生成';
-    setStatus('ok', '业务机绑定码已生成', `在业务机采集助手中输入绑定码：${d.bind_code || '-'}`);
-  } catch (e) {
-    setStatus('err', '绑定码生成失败', e.message);
-  }
 }
 
 function rawRecordTitle(row) {

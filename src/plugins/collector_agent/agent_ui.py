@@ -9,11 +9,11 @@ from tkinter import messagebox, ttk
 from typing import Any, Callable
 
 from . import agent_db_reader
-from .agent_auth import bind_with_code
+from .agent_auth import register_with_server
 from .agent_config import load_config, runtime_paths_public, save_config
 from .agent_models import AGENT_VERSION, OFFICIAL_NAME
 from .agent_service import CollectorAgentService
-from .agent_tray import AgentTray, disable_startup, enable_startup, open_logs_dir, startup_enabled
+from .agent_tray import AgentTray, disable_startup, enable_startup, icon_path, open_logs_dir, startup_enabled
 
 
 def now_text() -> str:
@@ -96,18 +96,31 @@ class AgentRuntimeController:
             self.config = load_config()
             self.service.config = self.config
             if not self.config.get("agent_token"):
-                self._publish(
-                    {
-                        "server_status": "未绑定",
-                        "current_status": "待绑定",
-                        "current_task": "请在设置中输入绑定码",
-                        "detail": "绑定成功后会自动进入后台待命",
-                        "component_text": self.component_text(),
-                    }
-                )
-                self.wake.wait(2)
-                self.wake.clear()
-                continue
+                try:
+                    self._publish(
+                        {
+                            "server_status": "上线注册中",
+                            "current_status": "重连中",
+                            "current_task": "自动注册业务机",
+                            "detail": "正在向 Web 服务注册本业务机",
+                            "component_text": self.component_text(),
+                        }
+                    )
+                    self.config = register_with_server(self.config.get("server_url", ""), self.config.get("machine_label", ""))
+                    self.service = CollectorAgentService(self.config)
+                except Exception as exc:
+                    self._publish(
+                        {
+                            "server_status": "重连中",
+                            "current_status": "重连中",
+                            "current_task": "等待 Web 服务恢复",
+                            "detail": f"上线注册失败，自动重试中：{exc}",
+                            "component_text": self.component_text(),
+                        }
+                    )
+                    self.wake.wait(2)
+                    self.wake.clear()
+                    continue
             try:
                 response = self.service.sync_once()
                 state = state_from_response(response)
@@ -116,6 +129,10 @@ class AgentRuntimeController:
                 self._publish(state)
                 interval = int(response.get("poll_interval_seconds") or self.config.get("poll_interval_seconds") or 2)
             except Exception as exc:
+                if "agent_token_invalid" in str(exc) or "agent_token_required" in str(exc):
+                    config = load_config()
+                    config["agent_token"] = ""
+                    save_config(config)
                 self._publish(
                     {
                         "server_status": "重连中",
@@ -158,13 +175,11 @@ class SettingsDialog(tk.Toplevel):
         body = ttk.Frame(self, padding=16)
         body.grid(row=0, column=0, sticky="nsew")
         self.server_var = tk.StringVar(value=str(self.config_data.get("server_url") or ""))
-        self.bind_var = tk.StringVar(value="")
         self.label_var = tk.StringVar(value=str(self.config_data.get("machine_label") or self.config_data.get("machine_name") or ""))
         self.startup_var = tk.BooleanVar(value=startup_enabled())
         rows = [
             ("服务器地址", self.server_var),
             ("业务机名称", self.label_var),
-            ("绑定码", self.bind_var),
         ]
         for index, (label, var) in enumerate(rows):
             ttk.Label(body, text=label).grid(row=index, column=0, sticky="w", pady=6)
@@ -181,13 +196,16 @@ class SettingsDialog(tk.Toplevel):
             config = load_config()
             server_url = self.server_var.get().strip()
             machine_label = self.label_var.get().strip()
+            should_reregister = (
+                server_url != str(config.get("server_url") or "")
+                or machine_label != str(config.get("machine_label") or config.get("machine_name") or "")
+            )
             config["server_url"] = server_url
             config["machine_label"] = machine_label or config.get("machine_label") or config.get("machine_name")
             config["machine_name"] = config["machine_label"]
+            if should_reregister:
+                config["agent_token"] = ""
             save_config(config)
-            bind_code = self.bind_var.get().strip()
-            if bind_code:
-                bind_with_code(server_url, bind_code, config["machine_label"])
             if self.startup_var.get():
                 enable_startup()
             else:
@@ -233,6 +251,7 @@ class AgentWindow(tk.Tk):
     def __init__(self, start_minimized: bool = False):
         super().__init__()
         self.title(f"{OFFICIAL_NAME} v{AGENT_VERSION}")
+        self.apply_window_icon()
         self.geometry("700x520")
         self.minsize(660, 500)
         self.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
@@ -253,6 +272,18 @@ class AgentWindow(tk.Tk):
         self.controller.start()
         if start_minimized:
             self.after(300, self.hide_to_tray)
+
+    def apply_window_icon(self) -> None:
+        try:
+            ico = icon_path("collector_agent_icon.ico")
+            if ico.exists():
+                self.iconbitmap(str(ico))
+            png = icon_path("collector_agent_icon.png")
+            if png.exists():
+                self._icon_photo = tk.PhotoImage(file=str(png))
+                self.iconphoto(True, self._icon_photo)
+        except Exception:
+            pass
 
     def build(self) -> None:
         style = ttk.Style(self)
@@ -340,7 +371,7 @@ class AgentWindow(tk.Tk):
     def after_config_changed(self) -> None:
         self.refresh_config_fields()
         self.controller.reload_config()
-        self.apply_state({"server_status": "连接中", "current_status": "重连中", "current_task": "验证绑定", "detail": "设置已保存，正在重新连接"})
+        self.apply_state({"server_status": "连接中", "current_status": "重连中", "current_task": "上线注册", "detail": "设置已保存，正在重新连接并注册业务机"})
 
     def hide_to_tray(self) -> None:
         self.withdraw()
