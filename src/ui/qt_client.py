@@ -243,7 +243,19 @@ class ClientWindow(QMainWindow):
         self.log_box.append(f"[{ts}] {message}")
 
 
+def service_config_self_test():
+    try:
+        window_title("self-test")
+        get_output_dir()
+        return 0
+    except Exception:
+        return 1
+
+
 def main():
+    if "--self-test" in sys.argv:
+        sys.exit(service_config_self_test())
+
     app = QApplication(sys.argv)
     apply_app_style(app)
     guard = SingleInstanceGuard("client", app)

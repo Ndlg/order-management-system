@@ -2144,7 +2144,22 @@ class AdminWindow(QMainWindow):
         )
 
 
+def service_config_self_test():
+    try:
+        assert APP_VERSION
+        get_data_dir()
+        get_output_dir()
+        get_images_dir()
+        get_image_category_dir()
+        return 0
+    except Exception:
+        return 1
+
+
 def main():
+    if "--self-test" in sys.argv:
+        sys.exit(service_config_self_test())
+
     app = QApplication(sys.argv)
     apply_app_style(app)
     guard = SingleInstanceGuard("admin", app)

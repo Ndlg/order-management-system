@@ -446,7 +446,7 @@ class WebConsoleWindow(QMainWindow):
 
 
 def main():
-    if "--self-test-web" in sys.argv:
+    if "--self-test" in sys.argv or "--self-test-web" in sys.argv:
         sys.exit(service_config_self_test())
 
     app = QApplication(sys.argv)

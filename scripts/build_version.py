@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -71,6 +72,41 @@ def run_command(args: list[str], log_file: Path, cwd: Path = PROJECT_ROOT, env: 
         proc = subprocess.run(args, cwd=cwd, env=env, text=True, stdout=log, stderr=subprocess.STDOUT, check=False)
         log.write(f"exit_code={proc.returncode}\n")
         return proc.returncode
+
+
+def stop_processes_using(path: Path) -> None:
+    path = Path(path).resolve()
+    if os.name != "nt" or not path.exists():
+        return
+    script = r"""
+$target = [System.IO.Path]::GetFullPath($env:TARGET_DIR)
+Get-Process | Where-Object {
+  $_.Path -and [System.IO.Path]::GetFullPath($_.Path).StartsWith($target, [System.StringComparison]::OrdinalIgnoreCase)
+} | Stop-Process -Force
+"""
+    env = os.environ.copy()
+    env["TARGET_DIR"] = str(path)
+    subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    time.sleep(0.5)
+
+
+def copy_with_retry(source: Path, target: Path, attempts: int = 12) -> None:
+    last_error: Exception | None = None
+    for _ in range(attempts):
+        try:
+            shutil.copy2(source, target)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.5)
+    if last_error:
+        raise last_error
 
 
 def pull_latest_source(skip: bool, log_file: Path) -> str:
@@ -153,10 +189,11 @@ def build_executables(version_dir: Path, log_file: Path) -> list[Path]:
     code = run_command([sys.executable, str(PROJECT_ROOT / "scripts" / "build_qt_windows.py")], log_file)
     if code != 0:
         raise SystemExit(f"PyInstaller build failed. See log: {log_file}")
+    stop_processes_using(version_dir / "bin")
     copied: list[Path] = []
     for exe in (TMP_ROOT / "build").rglob("*.exe"):
         target = version_dir / "bin" / exe.name
-        shutil.copy2(exe, target)
+        copy_with_retry(exe, target)
         copied.append(target)
     return copied
 

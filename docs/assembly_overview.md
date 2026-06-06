@@ -35,6 +35,14 @@ python scripts/build_version.py 7.9.2 --build-exe
 
 实际发给使用者时，只取 `bin/`。源码以 GitHub main 和 `source/` 快照保留，不混入 exe 交付包。
 
+编译完成后可运行无界面自检：
+
+```powershell
+versions/v7.9.2/bin/订单整理管理系统.exe --self-test
+versions/v7.9.2/bin/一键整理订单.exe --self-test
+versions/v7.9.2/bin/Web服务控制台.exe --self-test
+```
+
 ## 共用数据
 
 项目本地运行数据放在 `data/`。这里会保存 `system_data.enc`、`import_templates.json`、`images/`、`image_categories/`、`waybill-monitor/` 等生产数据。
