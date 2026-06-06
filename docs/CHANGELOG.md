@@ -13,3 +13,4 @@
 - 新增 `scripts/build_collector_agent.py`。
 - `scripts/build_version.py --build-agent` 会生成采集助手产物和 `release_manifest.json`。
 - 新增采集助手专项测试，覆盖 rowid 不丢失、异常回退、鉴权、重复上传和 pending 队列。
+- 采集助手改为无控制台 Windows GUI 程序，支持托盘常驻、关闭窗口不退出、开机启动、自动重连和空闲待命状态。

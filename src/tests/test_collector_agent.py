@@ -13,6 +13,7 @@ from plugins.collector_agent import agent_db_reader, agent_storage
 from plugins.collector_agent.agent_config import config_path, load_config
 from plugins.collector_agent.agent_models import AGENT_VERSION, PROTOCOL_VERSION
 from plugins.collector_agent.agent_service import CollectorAgentService
+from plugins.collector_agent.agent_ui import state_from_response
 
 
 class RuntimeEnv:
@@ -211,6 +212,12 @@ class CollectorAgentTest(unittest.TestCase):
             cfg = load_config()
             self.assertEqual(cfg["agent_version"], AGENT_VERSION)
             self.assertTrue(str(config_path()).startswith(str(root / "collector")))
+
+    def test_idle_poll_means_connected_standby_not_disconnected(self) -> None:
+        state = state_from_response({"ok": True, "command": "idle", "batch_id": ""})
+        self.assertEqual(state["server_status"], "已连接")
+        self.assertEqual(state["current_status"], "待命")
+        self.assertEqual(state["current_task"], "等待任务")
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--check-components", action="store_true", help="Check local print component database status.")
     parser.add_argument("--once", action="store_true", help="Run one poll/upload cycle.")
     parser.add_argument("--run", action="store_true", help="Run background polling service.")
+    parser.add_argument("--minimized", action="store_true", help="Start GUI minimized to tray.")
     parser.add_argument("--self-test", action="store_true", help="Run a startup self-test.")
     return parser.parse_args(argv)
 
@@ -80,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .agent_ui import run_app
 
-    run_app()
+    run_app(start_minimized=args.minimized)
     return 0
 
 

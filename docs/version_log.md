@@ -45,3 +45,9 @@
 - 回归测试: 通过 (0)
 - 产物: OrderSystem_source_v7.9.3.zip, OrderCollectorAgent_v7.9.3.exe, OrderCollectorAgent_v7.9.3.zip, release_manifest.json
 
+## v7.9.3 - 2026-06-07 02:19:07
+- 目录: `C:/Users/ndlgx/Documents/Projects/GitHub/Ndlg/order-management-system/versions/v7.9.3`
+- 拉取源码: skipped
+- 回归测试: 通过 (0)
+- 产物: OrderSystem_source_v7.9.3.zip, OrderCollectorAgent_v7.9.3.exe, OrderCollectorAgent_v7.9.3.zip, release_manifest.json
+- 说明: 采集助手改为无控制台 GUI，支持托盘常驻和自动重连。
