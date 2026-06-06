@@ -11,6 +11,7 @@
 - `data/input/`: 原始订单文件、图片等输入数据，禁止直接修改。
 - `data/reference/`: 共用参考数据，例如尺码表、鞋款映射表、SKU 关系表。
 - `data/output/`: 系统生成输出目录。
+- `data/` 根目录也承载本地生产数据，例如 `system_data.enc`、`import_templates.json`、`images/`、`image_categories/`，供项目内生成的 exe 共用。
 - `versions/vX.Y.Z/`: 每个新版本的唯一产物目录。
 - `docs/`: 说明书、版本说明、规范。
 - `scripts/`: 构建、迁移、清理等辅助脚本。

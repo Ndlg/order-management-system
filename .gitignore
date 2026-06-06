@@ -16,10 +16,15 @@ scripts/collector_client_legacy/spec_v*/
 # Runtime data
 data/*.enc
 data/import_templates.json
+data/backup/
+data/image_categories/
+data/images/
 data/input/*
 !data/input/.gitkeep
 data/output/*
 !data/output/.gitkeep
+data/sku_images/
+data/waybill-monitor/
 /output/
 /temp/
 uploads/

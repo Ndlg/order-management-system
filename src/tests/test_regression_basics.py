@@ -13,7 +13,7 @@ from PIL import Image as PILImage
 
 from core.order_core import merge_size_quantity, normalize_qty
 from core.waybill_raw_pipeline import parse_raw_waybill_records
-from utils.order_secure_common import get_output_dir, get_temp_dir
+from utils.order_secure_common import _source_project_root, get_output_dir, get_temp_dir
 
 
 class RegressionBasicsTest(unittest.TestCase):
@@ -45,6 +45,11 @@ class RegressionBasicsTest(unittest.TestCase):
         configured = os.environ.get("ORDER_SORTER_OUTPUT_DIR")
         if configured:
             self.assertEqual(Path(get_output_dir()).resolve(), Path(configured).resolve())
+
+    def test_version_executables_share_project_data_root(self) -> None:
+        project_root = Path(__file__).resolve().parents[2]
+        version_bin = project_root / "versions" / "v7.9.2" / "bin"
+        self.assertEqual(_source_project_root(version_bin), project_root)
 
     def test_source_root_contains_only_packages(self) -> None:
         src_root = Path(__file__).resolve().parents[1]

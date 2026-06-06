@@ -26,6 +26,18 @@ python scripts/build_version.py 7.9.2 --build-exe
 
 生成内容只允许进入 `versions/vX.Y.Z/`，临时文件只允许进入 `tmp/` 或版本目录。
 
+## 共用数据
+
+项目本地运行数据放在 `data/`。这里会保存 `system_data.enc`、`import_templates.json`、`images/`、`image_categories/`、`waybill-monitor/` 等生产数据。
+
+这些数据体积大且可能包含业务资料，默认被 `.gitignore` 忽略，不推到 GitHub。只要 exe 保持在项目目录或 `versions/vX.Y.Z/bin/` 下运行，程序会向上查找项目根目录并共用 `data/`。
+
+如需把 exe 拷贝到项目外运行，可以设置环境变量：
+
+```powershell
+$env:ORDER_SORTER_DATA_DIR = "C:\path\to\order-management-system\data"
+```
+
 ## 自动检查
 
 回归测试会检查：
