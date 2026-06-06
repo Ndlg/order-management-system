@@ -48,7 +48,7 @@ class RegressionBasicsTest(unittest.TestCase):
 
     def test_version_executables_share_project_data_root(self) -> None:
         project_root = Path(__file__).resolve().parents[2]
-        version_bin = project_root / "versions" / "v7.9.2" / "bin"
+        version_bin = project_root / "versions" / "v7.9.3" / "bin"
         self.assertEqual(_source_project_root(version_bin), project_root)
 
     def test_source_root_contains_only_packages(self) -> None:

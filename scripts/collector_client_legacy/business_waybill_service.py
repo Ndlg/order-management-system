@@ -20,6 +20,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 from core import waybill_collector_reader
+from core.collector_config import COLLECTION_MODE_FILTERED, utc_now_text, validate_collection_mode
 from core.waybill_files import record_key
 
 
@@ -28,6 +29,9 @@ DEFAULT_CONFIG = {
     "poll_interval_seconds": 2,
     "machine_name": "",
     "machine_label": "",
+    "collection_mode": COLLECTION_MODE_FILTERED,
+    "updated_at": "",
+    "collector_version": "legacy-v7.9.3",
 }
 
 def base_dir() -> Path:
@@ -40,29 +44,50 @@ def config_path() -> Path:
     return base_dir() / "business_waybill_service.json"
 
 
+def save_config(cfg: dict[str, Any]) -> None:
+    path = config_path()
+    tmp = path.with_suffix(".tmp.json")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def load_config() -> dict[str, Any]:
     path = config_path()
     if not path.exists():
-        path.write_text(json.dumps(DEFAULT_CONFIG, ensure_ascii=False, indent=2), encoding="utf-8")
-        return dict(DEFAULT_CONFIG)
+        cfg = dict(DEFAULT_CONFIG)
+        cfg["updated_at"] = utc_now_text()
+        save_config(cfg)
+        return cfg
     data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise RuntimeError("business_waybill_service.json must be a JSON object")
     merged = dict(DEFAULT_CONFIG)
     merged.update(data)
+    merged["collection_mode"] = validate_collection_mode(merged.get("collection_mode"))
+    if not str(merged.get("updated_at") or "").strip():
+        merged["updated_at"] = utc_now_text()
+        save_config(merged)
     return merged
 
 
-def post_json(server_url: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+def request_json(server_url: str, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    body = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8") if payload is not None else None
     request = urllib.request.Request(
         f"{server_url.rstrip('/')}{path}",
         data=body,
         headers={"Content-Type": "application/json; charset=utf-8"},
-        method="POST",
+        method=method,
     )
     with urllib.request.urlopen(request, timeout=10) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def post_json(server_url: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return request_json(server_url, path, "POST", payload)
+
+
+def put_json(server_url: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return request_json(server_url, path, "PUT", payload)
 
 
 def parse_task_time(value: Any) -> datetime | None:
@@ -145,6 +170,8 @@ def raw_upload_record(record: dict[str, Any], index: int = 0) -> dict[str, Any]:
         raw_text = "[无打印信息]"
     return {
         "打印信息": raw_text,
+        "raw_print_text": raw_text,
+        "raw_payload_json": json.dumps(record, ensure_ascii=False, default=str, separators=(",", ":")),
         "task_id": str(record.get("task_id") or ""),
         "document_id": str(record.get("document_id") or ""),
         "task_time": str(record.get("task_time") or ""),
@@ -163,6 +190,10 @@ class BusinessWaybillService:
         self.machine_name = str(cfg.get("machine_name") or socket.gethostname()).strip() or socket.gethostname()
         self.machine_label = str(cfg.get("machine_label") or self.machine_name).strip() or self.machine_name
         self.client_id = f"standalone-{self.machine_name}-{getpass.getuser()}"
+        self.collection_mode = validate_collection_mode(cfg.get("collection_mode"))
+        self.config_updated_at = str(cfg.get("updated_at") or utc_now_text())
+        self.collector_version = str(cfg.get("collector_version") or "legacy-v7.9.3")
+        self.config_mtime = self.current_config_mtime()
         self.active_batch_id = ""
         self.baseline_keys: set[str] = set()
         self.baseline_task_times: dict[str, str] = {}
@@ -175,13 +206,70 @@ class BusinessWaybillService:
     def run(self) -> None:
         if not self.server_url:
             raise RuntimeError("order_server_url is empty in business_waybill_service.json")
-        log(f"service_start server={self.server_url} machine={self.machine_label}")
+        log(f"service_start server={self.server_url} machine={self.machine_label} collection_mode={self.collection_mode}")
         while not self.stop_event.is_set():
             try:
                 self.tick()
             except Exception as exc:
                 self.log_connect_wait(exc)
             self.stop_event.wait(self.poll_interval)
+
+    def current_config_mtime(self) -> float:
+        try:
+            return config_path().stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def write_local_collection_mode(self, mode: str, updated_at: str) -> None:
+        cfg = load_config()
+        cfg["collection_mode"] = validate_collection_mode(mode)
+        cfg["updated_at"] = updated_at or utc_now_text()
+        save_config(cfg)
+        self.config_mtime = self.current_config_mtime()
+
+    def set_collection_mode(self, mode: str, updated_at: str = "", source: str = "system") -> None:
+        mode = validate_collection_mode(mode)
+        old_mode = self.collection_mode
+        self.collection_mode = mode
+        self.config_updated_at = updated_at or utc_now_text()
+        if old_mode != mode:
+            log(f"collection_mode_changed source={source} old={old_mode} new={mode}")
+        self.write_local_collection_mode(mode, self.config_updated_at)
+
+    def sync_local_config_change(self) -> None:
+        mtime = self.current_config_mtime()
+        if mtime <= self.config_mtime:
+            return
+        cfg = load_config()
+        mode = validate_collection_mode(cfg.get("collection_mode"))
+        updated_at = str(cfg.get("updated_at") or utc_now_text())
+        self.config_mtime = mtime
+        if mode == self.collection_mode and updated_at == self.config_updated_at:
+            return
+        self.collection_mode = mode
+        self.config_updated_at = updated_at
+        response = put_json(
+            self.server_url,
+            "/api/collector/config",
+            {
+                "collection_mode": mode,
+                "updated_by": "collector",
+                "collector_id": self.client_id,
+            },
+        )
+        if response.get("ok"):
+            self.set_collection_mode(response.get("collection_mode") or mode, response.get("updated_at") or updated_at, "local")
+        else:
+            log(f"collection_mode_sync_rejected response={response}")
+
+    def apply_server_collection_config(self, response: dict[str, Any]) -> None:
+        config = response.get("collector_config") if isinstance(response.get("collector_config"), dict) else response
+        mode = config.get("collection_mode")
+        if not mode:
+            return
+        updated_at = str(config.get("updated_at") or "")
+        if mode != self.collection_mode or (updated_at and updated_at != self.config_updated_at):
+            self.set_collection_mode(mode, updated_at, "server")
 
     def log_connect_wait(self, exc: Exception) -> None:
         text = str(exc)
@@ -193,6 +281,7 @@ class BusinessWaybillService:
         log(f"waiting_order_server server={self.server_url} reason={text}")
 
     def tick(self) -> None:
+        self.sync_local_config_change()
         response = post_json(
             self.server_url,
             "/api/waybill/agent/poll",
@@ -205,11 +294,15 @@ class BusinessWaybillService:
                 "platform": platform.platform(),
                 "active_batch_id": self.active_batch_id,
                 "components": waybill_collector_reader.component_status(),
+                "collection_mode": self.collection_mode,
+                "collector_config_updated_at": self.config_updated_at,
+                "collector_version": self.collector_version,
             },
         )
         if not response.get("ok"):
             log(f"poll_rejected {response}")
             return
+        self.apply_server_collection_config(response)
         command = str(response.get("command") or "idle").lower()
         batch_id = str(response.get("batch_id") or "")
         if command == "start" and batch_id:
@@ -227,7 +320,7 @@ class BusinessWaybillService:
         self.baseline_task_times = {key: str(row.get("task_time") or "") for key, row in keyed_records if key}
         self.baseline_rowids = baseline_component_rowids(records)
         component_text = ",".join(f"{Path(db_id).name}:{rowid}" for db_id, rowid in sorted(self.baseline_rowids.items()))
-        log(f"batch_start batch={batch_id} baseline={len(records)} components={component_text}")
+        log(f"batch_start batch={batch_id} baseline={len(records)} collection_mode={self.collection_mode} components={component_text}")
 
     def stop_batch(self, batch_id: str) -> None:
         if batch_id in self.uploaded_batches:
@@ -255,6 +348,8 @@ class BusinessWaybillService:
                 "records_scanned": len(records),
                 "capture_mode": "raw_waybill",
                 "upload_mode": "batch_rowid_increment_preserve_all_content",
+                "collection_mode": self.collection_mode,
+                "collector_version": self.collector_version,
             },
         )
         if response.get("ok"):
@@ -262,7 +357,7 @@ class BusinessWaybillService:
             self.active_batch_id = ""
             log(
                 f"batch_uploaded batch={batch_id} records={len(batch_records)} "
-                f"found={len(records)} mode=batch_rowid_increment_preserve_all_content"
+                f"found={len(records)} collection_mode={self.collection_mode} mode=batch_rowid_increment_preserve_all_content"
             )
         else:
             log(f"upload_rejected batch={batch_id} response={response}")

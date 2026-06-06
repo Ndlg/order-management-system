@@ -20,8 +20,8 @@ uvicorn ui.app:app --app-dir src --host 127.0.0.1 --port 8000
 ## 构建入口
 
 ```powershell
-python scripts/build_version.py 7.9.2
-python scripts/build_version.py 7.9.2 --build-exe
+python scripts/build_version.py 7.9.3
+python scripts/build_version.py 7.9.3 --build-exe
 ```
 
 生成内容只允许进入 `versions/vX.Y.Z/`，临时文件只允许进入 `tmp/` 或版本目录。
@@ -38,9 +38,9 @@ python scripts/build_version.py 7.9.2 --build-exe
 编译完成后可运行无界面自检：
 
 ```powershell
-versions/v7.9.2/bin/订单整理管理系统.exe --self-test
-versions/v7.9.2/bin/一键整理订单.exe --self-test
-versions/v7.9.2/bin/Web服务控制台.exe --self-test
+versions/v7.9.3/bin/订单整理管理系统.exe --self-test
+versions/v7.9.3/bin/一键整理订单.exe --self-test
+versions/v7.9.3/bin/Web服务控制台.exe --self-test
 ```
 
 ## 共用数据

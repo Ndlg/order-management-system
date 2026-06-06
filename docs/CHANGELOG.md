@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## V7.9.3_20260607
+
+### 新增
+
+- Web 后端新增 `/api/collector/config`，统一维护 `filtered` / `full` 采集模式，非法模式直接拒绝。
+- Web 后端新增 `/api/collector/raw-records`，可查看采集工具回传的真实打印原文和采集时模式。
+- 业务机采集客户端新增 `collection_mode` 本地配置，启动、poll、上传时与服务端同步。
+- 服务端把采集原文持久化到 `data/waybill-monitor/collector_raw_records.jsonl`，保留 `raw_print_text`、`raw_payload_json`、`raw_hash`、`parse_status`、`collector_version` 等追溯字段。
+- Web 生成页的 `监听打印机面单` 区块新增模式切换、最近原文列表、详情查看和复制。
+
+### 测试
+
+- 新增 `src/tests/test_collector_mode.py`，覆盖默认模式、非法模式、接口切换、全量采集保存未识别原文和上传持久化。
+
 ## V7.9.2_20260605
 
 ### 修复

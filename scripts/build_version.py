@@ -190,8 +190,12 @@ def build_executables(version_dir: Path, log_file: Path) -> list[Path]:
     if code != 0:
         raise SystemExit(f"PyInstaller build failed. See log: {log_file}")
     stop_processes_using(version_dir / "bin")
+    dist_dirs = [path for path in (TMP_ROOT / "build").glob("dist_qt_*") if path.is_dir()]
+    if not dist_dirs:
+        raise SystemExit(f"PyInstaller output directory not found. See log: {log_file}")
+    latest_dist = max(dist_dirs, key=lambda path: path.stat().st_mtime)
     copied: list[Path] = []
-    for exe in (TMP_ROOT / "build").rglob("*.exe"):
+    for exe in latest_dist.glob("*.exe"):
         target = version_dir / "bin" / exe.name
         copy_with_retry(exe, target)
         copied.append(target)

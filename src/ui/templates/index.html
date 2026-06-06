@@ -406,6 +406,142 @@
       margin-top: 4px;
     }
 
+    .collector-mode-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+
+    .collector-mode-label {
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .collector-mode-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .collector-mode-switch button {
+      border: 0;
+      border-radius: 6px;
+      padding: 7px 10px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .collector-mode-switch button.active {
+      color: #fff;
+      background: var(--blue);
+    }
+
+    .collector-mode-state {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .raw-record-box {
+      display: grid;
+      grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .raw-record-list {
+      display: grid;
+      gap: 6px;
+      max-height: 220px;
+      overflow: auto;
+    }
+
+    .raw-record-item {
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 8px 10px;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .raw-record-item.active {
+      border-color: #2563eb;
+      background: #eff6ff;
+    }
+
+    .raw-record-main {
+      font-weight: 800;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .raw-record-meta {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .raw-record-view {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .raw-record-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .raw-record-toolbar button {
+      border: 0;
+      border-radius: 6px;
+      padding: 5px 8px;
+      background: #eef2f7;
+      color: var(--text);
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .raw-record-text {
+      min-height: 120px;
+      max-height: 220px;
+      margin: 0;
+      padding: 10px;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      color: #1f2937;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    }
+
     .monitor-actions {
       display: flex;
       align-items: center;
@@ -547,6 +683,7 @@
       .mode-group { grid-template-columns: 1fr; }
       .file-zone { align-items: stretch; flex-direction: column; }
       .monitor-actions { justify-content: flex-start; }
+      .raw-record-box { grid-template-columns: 1fr; }
       .download-box { align-items: stretch; flex-direction: column; }
       .download-link { width: 100%; }
     }
@@ -610,6 +747,24 @@
                   <div class="monitor-title">业务机同步采集本次打印信息原文</div>
                   <div id="waybillDetail" class="monitor-detail">读取业务机监听状态中...</div>
                   <div id="waybillCollectors" class="collector-list" aria-live="polite"></div>
+                  <div class="collector-mode-row">
+                    <span class="collector-mode-label">采集模式</span>
+                    <span class="collector-mode-switch" role="group" aria-label="采集模式">
+                      <button id="collectionModeFiltered" type="button" onclick="setCollectorMode('filtered')">筛选采集</button>
+                      <button id="collectionModeFull" type="button" onclick="setCollectorMode('full')">全量采集</button>
+                    </span>
+                    <span id="collectionModeState" class="collector-mode-state">读取中</span>
+                  </div>
+                  <div class="raw-record-box">
+                    <div id="collectorRawRecords" class="raw-record-list" aria-live="polite"></div>
+                    <div class="raw-record-view">
+                      <div class="raw-record-toolbar">
+                        <span id="collectorRawMeta">打印原文</span>
+                        <button type="button" onclick="copyRawRecordText()">复制</button>
+                      </div>
+                      <pre id="collectorRawText" class="raw-record-text">未采集到原文</pre>
+                    </div>
+                  </div>
                 </div>
                 <div class="monitor-actions">
                   <button id="waybillStart" class="btn success" type="button" onclick="startWaybillMonitor()">开始监听</button>
@@ -692,9 +847,17 @@ const waybillStart = document.getElementById('waybillStart');
 const waybillStop = document.getElementById('waybillStop');
 const waybillRawDownload = document.getElementById('waybillRawDownload');
 const waybillProcessedDownload = document.getElementById('waybillProcessedDownload');
+const collectionModeFiltered = document.getElementById('collectionModeFiltered');
+const collectionModeFull = document.getElementById('collectionModeFull');
+const collectionModeState = document.getElementById('collectionModeState');
+const collectorRawRecords = document.getElementById('collectorRawRecords');
+const collectorRawText = document.getElementById('collectorRawText');
+const collectorRawMeta = document.getElementById('collectorRawMeta');
 const WAYBILL_RAW_TEMPLATE_NAME = '监控面单-原文模式';
 const WAYBILL_PROCESSED_TEMPLATE_NAME = '监控面单-识别结果模式';
 let serverFiles = [];
+let selectedRawRecordText = '';
+let selectedRawRecordId = '';
 
 document.getElementById('template').addEventListener('change', () => {
   syncTemplateLabels();
@@ -803,6 +966,102 @@ function appendText(parent, className, text, tagName = 'div') {
   return node;
 }
 
+function collectionModeLabel(mode) {
+  return mode === 'full' ? '全量采集' : '筛选采集';
+}
+
+function setCollectorModeButtons(mode, config) {
+  const value = mode === 'full' ? 'full' : 'filtered';
+  collectionModeFiltered.classList.toggle('active', value === 'filtered');
+  collectionModeFull.classList.toggle('active', value === 'full');
+  const updated = config && config.updated_at ? `，${config.updated_by || 'system'} ${config.updated_at}` : '';
+  collectionModeState.textContent = `当前：${collectionModeLabel(value)}${updated}`;
+}
+
+async function setCollectorMode(mode) {
+  try {
+    const r = await fetch('/api/collector/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ collection_mode: mode, updated_by: 'web', collector_id: 'web' })
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || '模式保存失败');
+    setCollectorModeButtons(d.collection_mode, d);
+    setStatus('ok', '采集模式已更新', `当前模式：${collectionModeLabel(d.collection_mode)}`);
+    await refreshWaybillStatus();
+  } catch (e) {
+    setStatus('err', '采集模式更新失败', e.message);
+  }
+}
+
+function rawRecordTitle(row) {
+  const source = row.machine_label || row.collector_id || '采集记录';
+  const mode = row.collection_mode ? collectionModeLabel(row.collection_mode) : '未知模式';
+  return `${source} / ${mode}`;
+}
+
+function renderRawRecords(records) {
+  collectorRawRecords.textContent = '';
+  if (!records.length) {
+    appendText(collectorRawRecords, 'collector-empty', '暂无采集原文');
+    collectorRawText.textContent = '未采集到原文';
+    collectorRawMeta.textContent = '打印原文';
+    selectedRawRecordText = '';
+    selectedRawRecordId = '';
+    return;
+  }
+  const activeId = records.some((row) => row.record_id === selectedRawRecordId)
+    ? selectedRawRecordId
+    : (records[0].record_id || '');
+  records.forEach((row, index) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = `raw-record-item ${row.record_id === activeId ? 'active' : ''}`.trim();
+    item.dataset.recordId = row.record_id || '';
+    appendText(item, 'raw-record-main', rawRecordTitle(row));
+    appendText(item, 'raw-record-meta', `${row.parse_status || '-'} · ${row.created_at || ''}`);
+    item.addEventListener('click', () => loadRawRecordDetail(row.record_id, item));
+    collectorRawRecords.appendChild(item);
+  });
+  const activeItem = Array.from(collectorRawRecords.querySelectorAll('.raw-record-item'))
+    .find((node) => node.dataset.recordId === activeId);
+  loadRawRecordDetail(activeId, activeItem);
+}
+
+async function loadRawRecordDetail(recordId, item) {
+  if (!recordId) return;
+  try {
+    const r = await fetch(`/api/collector/raw-records/${encodeURIComponent(recordId)}`, { cache: 'no-store' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || '原文读取失败');
+    const record = d.record || {};
+    selectedRawRecordId = record.record_id || recordId;
+    selectedRawRecordText = record.raw_print_text || '';
+    collectorRawText.textContent = selectedRawRecordText || '未采集到原文';
+    collectorRawMeta.textContent = `${collectionModeLabel(record.collection_mode)} · ${record.parse_status || '-'} · ${record.raw_length || 0} 字`;
+    collectorRawRecords.querySelectorAll('.raw-record-item').forEach((node) => node.classList.remove('active'));
+    if (item) item.classList.add('active');
+  } catch (e) {
+    collectorRawText.textContent = e.message;
+    collectorRawMeta.textContent = '原文读取失败';
+    selectedRawRecordText = '';
+  }
+}
+
+async function copyRawRecordText() {
+  if (!selectedRawRecordText) {
+    setStatus('err', '没有可复制的打印原文', '当前记录未采集到原文。');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(selectedRawRecordText);
+    setStatus('ok', '打印原文已复制', '');
+  } catch (e) {
+    setStatus('err', '复制失败', e.message);
+  }
+}
+
 function collectorComponentText(row) {
   const components = Array.isArray(row.components) ? row.components : [];
   const total = Number(row.component_count || components.length || 0);
@@ -860,6 +1119,8 @@ async function refreshWaybillStatus() {
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || '读取失败');
     setWaybillButtons(!!d.active);
+    setCollectorModeButtons(d.collection_mode || 'filtered', d.collector_config || {});
+    renderRawRecords(d.raw_records || []);
     const collectors = d.collectors || [];
     renderWaybillCollectors(collectors);
     setWaybillDownloads(
@@ -887,7 +1148,9 @@ async function refreshWaybillStatus() {
     }
   } catch (e) {
     setWaybillButtons(false);
+    setCollectorModeButtons('filtered', {});
     renderWaybillCollectors([]);
+    renderRawRecords([]);
     setWaybillText(`监听状态读取失败：${e.message}`);
     setWaybillDownloads('', '', '', '');
   }

@@ -16,6 +16,15 @@ if str(SRC_ROOT) not in sys.path:
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
+from core import collector_raw_records
+from core.collector_config import (
+    DEFAULT_COLLECTOR_ID,
+    load_collector_config,
+    maybe_accept_collector_config,
+    public_collector_config,
+    save_collector_config,
+    validate_collection_mode,
+)
 from core.order_core import generate_order_file
 from core.waybill_raw_pipeline import parse_raw_waybill_records, write_processed_waybill_xlsx
 from utils.app_info import APP_VERSION
@@ -174,6 +183,8 @@ def public_waybill_collectors():
                 "uploaded_records": len(upload.get("records", [])) if upload else 0,
                 "uploaded_at": upload.get("uploaded_at") or "",
                 "records_found": upload.get("records_found", 0) if upload else 0,
+                "collection_mode": item.get("collection_mode") or upload.get("collection_mode") or "",
+                "collector_version": item.get("collector_version") or upload.get("collector_version") or "",
             }
         )
     return rows
@@ -302,6 +313,7 @@ def waybill_status_payload():
     last_raw_count = WAYBILL_REMOTE_STATE.get("last_raw_count", 0) or waybill_raw_row_count(last_raw_file)
     last_processed_file = latest_waybill_processed_file()
     last_processed_count = WAYBILL_REMOTE_STATE.get("last_processed_count", 0) or waybill_raw_row_count(last_processed_file)
+    collector_config = public_collector_config()
     return {
         "ok": True,
         "web_version": WEB_VERSION,
@@ -324,6 +336,9 @@ def waybill_status_payload():
         "uploaded_collectors": len(WAYBILL_REMOTE_STATE.get("uploads", {})),
         "template_name": WAYBILL_TEMPLATE_NAME,
         "processed_template_name": WAYBILL_PROCESSED_TEMPLATE_NAME,
+        "collector_config": collector_config,
+        "collection_mode": collector_config.get("collection_mode"),
+        "raw_records": collector_raw_records.list_raw_records(limit=10),
     }
 
 
@@ -394,6 +409,41 @@ def get_current_system():
         return system, system_id
 
     return data, "default"
+
+
+@app.get("/api/collector/config")
+def api_collector_config():
+    return {"ok": True, "web_version": WEB_VERSION, **public_collector_config()}
+
+
+@app.put("/api/collector/config")
+def api_collector_config_update(payload: dict):
+    try:
+        config = save_collector_config(
+            payload.get("collection_mode"),
+            updated_by=str(payload.get("updated_by") or "web"),
+            collector_id=str(payload.get("collector_id") or DEFAULT_COLLECTOR_ID),
+        )
+        return {"ok": True, "web_version": WEB_VERSION, **public_collector_config(config)}
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": str(exc)}, status_code=400)
+
+
+@app.get("/api/collector/raw-records")
+def api_collector_raw_records(limit: int = 50):
+    return {
+        "ok": True,
+        "web_version": WEB_VERSION,
+        "records": collector_raw_records.list_raw_records(limit=limit),
+    }
+
+
+@app.get("/api/collector/raw-records/{record_id}")
+def api_collector_raw_record_detail(record_id: str):
+    record = collector_raw_records.get_raw_record(record_id)
+    if not record:
+        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": "record_not_found"}, status_code=404)
+    return {"ok": True, "web_version": WEB_VERSION, "record": record}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -539,6 +589,10 @@ def api_waybill_agent_poll(payload: dict):
     client_id = str(payload.get("client_id") or "").strip()
     if not client_id:
         return JSONResponse({"ok": False, "error": "client_id_required"}, status_code=400)
+    try:
+        collector_config = public_collector_config(maybe_accept_collector_config(payload))
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": str(exc)}, status_code=400)
 
     collectors = WAYBILL_REMOTE_STATE.setdefault("collectors", {})
     collectors[client_id] = {
@@ -550,6 +604,8 @@ def api_waybill_agent_poll(payload: dict):
         "platform": str(payload.get("platform") or ""),
         "active_batch_id": str(payload.get("active_batch_id") or ""),
         "components": payload.get("components") if isinstance(payload.get("components"), list) else [],
+        "collection_mode": collector_config.get("collection_mode"),
+        "collector_version": str(payload.get("collector_version") or ""),
         "last_seen": current_time_text(),
     }
 
@@ -571,6 +627,8 @@ def api_waybill_agent_poll(payload: dict):
         "batch_id": batch_id,
         "status": status_text,
         "recognition_mode": "server",
+        "collection_mode": collector_config.get("collection_mode"),
+        "collector_config": collector_config,
         "server_rule_count": len(system.get("category_rules", []) if isinstance(system, dict) else []),
         "poll_interval_seconds": 2,
     }
@@ -588,9 +646,16 @@ def api_waybill_agent_upload(payload: dict):
     records_raw = payload.get("records", [])
     if not isinstance(records_raw, list):
         return JSONResponse({"ok": False, "error": "records_must_be_list"}, status_code=400)
+    try:
+        collection_mode = validate_collection_mode(
+            payload.get("collection_mode") or load_collector_config().get("collection_mode")
+        )
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "web_version": WEB_VERSION, "error": str(exc)}, status_code=400)
 
     machine_name = str(payload.get("machine_name") or "")
     machine_label = str(payload.get("machine_label") or machine_name or client_id)
+    collector_version = str(payload.get("collector_version") or "")
     records = []
     for index, row in enumerate(records_raw, 1):
         if not isinstance(row, dict):
@@ -600,7 +665,19 @@ def api_waybill_agent_upload(payload: dict):
         record.setdefault("source_record_index", index)
         record["machine_name"] = machine_name
         record["machine_label"] = machine_label
+        record["collection_mode"] = collection_mode
+        record["collector_version"] = collector_version
         records.append(record)
+
+    system, _ = get_current_system()
+    collector_raw_records.append_raw_records(
+        records,
+        collection_mode=collection_mode,
+        collector_id=client_id,
+        batch_id=batch_id,
+        collector_version=collector_version,
+        rule_config=system.get("waybill_parse_rules", {}) if isinstance(system, dict) else {},
+    )
 
     WAYBILL_REMOTE_STATE.setdefault("uploads", {})[client_id] = {
         "client_id": client_id,
@@ -610,6 +687,8 @@ def api_waybill_agent_upload(payload: dict):
         "username": str(payload.get("username") or ""),
         "uploaded_at": current_time_text(),
         "records_found": int(payload.get("records_found") or len(records)),
+        "collection_mode": collection_mode,
+        "collector_version": collector_version,
         "records": records,
     }
     if WAYBILL_REMOTE_STATE.get("status") in {"stopping", "finished"}:
@@ -619,6 +698,7 @@ def api_waybill_agent_upload(payload: dict):
         "web_version": WEB_VERSION,
         "batch_id": batch_id,
         "accepted": len(records),
+        "collection_mode": collection_mode,
         "uploaded_collectors": list(WAYBILL_REMOTE_STATE.get("uploads", {}).keys()),
     }
 
