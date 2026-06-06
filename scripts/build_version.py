@@ -46,6 +46,7 @@ def ensure_layout(version_dir: Path) -> None:
         TMP_ROOT,
         version_dir / "bin",
         version_dir / "logs",
+        version_dir / "source",
         version_dir / "tests",
     ):
         path.mkdir(parents=True, exist_ok=True)
@@ -117,8 +118,8 @@ def run_regression_tests(version_dir: Path, log_file: Path) -> int:
     return code
 
 
-def create_source_package(version: str, version_dir: Path) -> Path:
-    artifact = version_dir / "bin" / f"OrderSystem_{version}.zip"
+def create_source_snapshot(version: str, version_dir: Path) -> Path:
+    artifact = version_dir / "source" / f"OrderSystem_source_{version}.zip"
     if artifact.exists():
         artifact.unlink()
     include_roots = (SRC_ROOT, PROJECT_ROOT / "scripts", DOCS_ROOT)
@@ -133,6 +134,18 @@ def create_source_package(version: str, version_dir: Path) -> Path:
         requirements = PROJECT_ROOT / "requirements.txt"
         if requirements.exists():
             zf.write(requirements, requirements.relative_to(PROJECT_ROOT))
+    return artifact
+
+
+def create_release_package(version: str, version_dir: Path, executable_files: list[Path]) -> Path | None:
+    if not executable_files:
+        return None
+    artifact = version_dir / "bin" / f"OrderSystem_{version}.zip"
+    if artifact.exists():
+        artifact.unlink()
+    with zipfile.ZipFile(artifact, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in executable_files:
+            zf.write(path, path.relative_to(version_dir / "bin"))
     return artifact
 
 
@@ -180,9 +193,13 @@ def main() -> int:
     git_status = pull_latest_source(args.skip_git_pull, log_file)
     copy_test_data(version_dir)
     test_code = run_regression_tests(version_dir, log_file)
-    artifacts = [create_source_package(version, version_dir)]
+    artifacts = [create_source_snapshot(version, version_dir)]
     if args.build_exe:
-        artifacts.extend(build_executables(version_dir, log_file))
+        executable_files = build_executables(version_dir, log_file)
+        artifacts.extend(executable_files)
+        release_package = create_release_package(version, version_dir, executable_files)
+        if release_package:
+            artifacts.append(release_package)
     append_version_log(version, version_dir, git_status, test_code, artifacts)
     cleanup_tmp(args.keep_tmp)
     print(f"version_dir={version_dir}")

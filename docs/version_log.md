@@ -8,9 +8,9 @@
 - 目录: `src/core`, `src/ui`, `src/utils`
 - 说明: 主程序代码已按核心逻辑、界面、通用工具真实拆分存储。
 
-## v7.9.2 - 2026-06-06 22:13:23
+## v7.9.2 - 2026-06-06 23:09:24
 - 目录: `C:/Users/ndlgx/Documents/Projects/GitHub/Ndlg/order-management-system/versions/v7.9.2`
 - 拉取源码: skipped
 - 回归测试: 通过 (0)
-- 产物: OrderSystem_v7.9.2.zip
+- 产物: OrderSystem_source_v7.9.2.zip
 

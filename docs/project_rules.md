@@ -33,14 +33,28 @@ python scripts/build_version.py 7.5.1
 versions/v7.5.1/
 ├── bin/
 ├── logs/
+├── source/
 └── tests/
 ```
 
-默认产物是 `OrderSystem_vX.Y.Z.zip`。如需尝试 PyInstaller 打包：
+目录规则：
+
+- `bin/`: 只放生产交付物，例如 `OrderSystem_vX.Y.Z.exe` 或只包含 exe 的 `OrderSystem_vX.Y.Z.zip`。
+- `source/`: 只放当代源码快照，例如 `OrderSystem_source_vX.Y.Z.zip`，用于回溯和审计，不作为生产交付物。
+- `logs/`: 构建日志。
+- `tests/`: 回归测试数据副本和报告。
+
+默认会生成源码快照和测试报告，不生成 exe。如需尝试 PyInstaller 打包：
 
 ```powershell
 python scripts/build_version.py 7.5.1 --build-exe
 ```
+
+生成后的处理规则：
+
+- 给实际使用的人，只拿 `versions/vX.Y.Z/bin/` 里的 exe 或 release zip。
+- 源码不放进生产交付包；源码以 GitHub main 和 `versions/vX.Y.Z/source/` 快照为准。
+- 生产数据不打包进 exe，也不放进 release zip；exe 在项目内运行时共用项目根目录 `data/`。
 
 ## 测试和输出
 

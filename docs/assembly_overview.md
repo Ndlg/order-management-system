@@ -26,6 +26,15 @@ python scripts/build_version.py 7.9.2 --build-exe
 
 生成内容只允许进入 `versions/vX.Y.Z/`，临时文件只允许进入 `tmp/` 或版本目录。
 
+版本目录处理规则：
+
+- `versions/vX.Y.Z/bin/`: 生产交付目录，只放 exe 和只包含 exe 的 release zip。
+- `versions/vX.Y.Z/source/`: 源码快照目录，只用于回溯，不给生产使用者。
+- `versions/vX.Y.Z/tests/`: 测试数据副本和 `report.log`。
+- `versions/vX.Y.Z/logs/`: 构建日志。
+
+实际发给使用者时，只取 `bin/`。源码以 GitHub main 和 `source/` 快照保留，不混入 exe 交付包。
+
 ## 共用数据
 
 项目本地运行数据放在 `data/`。这里会保存 `system_data.enc`、`import_templates.json`、`images/`、`image_categories/`、`waybill-monitor/` 等生产数据。
