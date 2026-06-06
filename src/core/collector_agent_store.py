@@ -271,7 +271,7 @@ def public_agent(row: dict[str, Any]) -> dict[str, Any]:
         "last_upload_at": row.get("last_upload_at", ""),
         "last_upload_count": int(row.get("last_upload_count") or 0),
         "upgrade_required": upgrade,
-        "upgrade_message": "业务机采集助手需要升级" if upgrade else "",
+        "upgrade_message": "打印组件信息采集需要升级" if upgrade else "",
         "download_url": row.get("download_url", ""),
     }
 

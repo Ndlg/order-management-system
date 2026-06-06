@@ -18,10 +18,12 @@ TMP_BUILD_ROOT = PROJECT_ROOT / "tmp" / "build"
 AGENT_ENTRY = SRC_ROOT / "plugins" / "collector_agent" / "agent_app.py"
 ASSET_ROOT = SRC_ROOT / "plugins" / "collector_agent" / "assets"
 AGENT_ICON = ASSET_ROOT / "collector_agent_icon.ico"
+AGENT_DISPLAY_NAME = "打印组件信息采集"
+LEGACY_AGENT_DISPLAY_NAMES = ("OrderCollectorAgent",)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build OrderCollectorAgent.")
+    parser = argparse.ArgumentParser(description="Build 打印组件信息采集.")
     parser.add_argument("--version", default="7.9.3", help="Agent version, for example 7.9.3.")
     parser.add_argument("--output-dir", default="", help="Optional directory to copy the final exe into.")
     parser.add_argument("--keep-build", action="store_true", help="Keep PyInstaller work/spec directories.")
@@ -128,10 +130,17 @@ def refresh_shell_icons() -> None:
     )
 
 
+def remove_legacy_outputs(output_dir: Path, version: str) -> None:
+    for legacy_name in LEGACY_AGENT_DISPLAY_NAMES:
+        legacy_path = output_dir / f"{legacy_name}_v{version}.exe"
+        if legacy_path.exists():
+            legacy_path.unlink()
+
+
 def build_agent(version: str, keep_build: bool = False) -> Path:
     version = normalized_version(version)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    exe_name = f"OrderCollectorAgent_v{version}"
+    exe_name = f"{AGENT_DISPLAY_NAME}_v{version}"
     dist = TMP_BUILD_ROOT / f"dist_collector_agent_v{version.replace('.', '_')}_{stamp}"
     build = TMP_BUILD_ROOT / f"build_collector_agent_v{version.replace('.', '_')}_{stamp}"
     spec = TMP_BUILD_ROOT / f"spec_collector_agent_v{version.replace('.', '_')}_{stamp}"
@@ -208,6 +217,7 @@ def main() -> int:
         target_dir = Path(args.output_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
         stop_project_processes_using(target_dir)
+        remove_legacy_outputs(target_dir, normalized_version(args.version))
         target = target_dir / exe.name
         copy_with_retry(exe, target)
         exe = target

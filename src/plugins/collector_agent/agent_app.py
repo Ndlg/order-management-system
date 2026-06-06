@@ -60,7 +60,7 @@ def notify_already_running(silent: bool = False) -> None:
 
         root = tk.Tk()
         root.withdraw()
-        messagebox.showinfo(OFFICIAL_NAME, "业务机采集助手已经在运行。")
+        messagebox.showinfo(OFFICIAL_NAME, "打印组件信息采集已经在运行。")
         root.destroy()
     except Exception:
         print_json({"ok": False, "error": "already_running"})

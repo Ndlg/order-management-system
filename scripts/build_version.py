@@ -23,6 +23,8 @@ VERSIONS_ROOT = PROJECT_ROOT / "versions"
 COLLECTOR_PROTOCOL_VERSION = "collector.v1"
 COLLECTOR_AGENT_VERSION = "7.9.3"
 MIN_SUPPORTED_AGENT_VERSION = "7.9.3"
+COLLECTOR_AGENT_DISPLAY_NAME = "打印组件信息采集"
+LEGACY_COLLECTOR_AGENT_DISPLAY_NAMES = ("OrderCollectorAgent",)
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("version", help="Version number, for example 7.5.1 or v7.5.1.")
     parser.add_argument("--skip-git-pull", action="store_true", help="Skip git pull before building.")
     parser.add_argument("--build-exe", action="store_true", help="Run PyInstaller and copy exe files into bin/.")
-    parser.add_argument("--build-agent", action="store_true", help="Build OrderCollectorAgent and copy it into bin/.")
+    parser.add_argument("--build-agent", action="store_true", help="Build 打印组件信息采集 and copy it into bin/.")
     parser.add_argument("--keep-tmp", action="store_true", help="Keep tmp/build_version after the build.")
     return parser.parse_args()
 
@@ -191,9 +193,13 @@ def create_release_package(version: str, version_dir: Path, executable_files: li
 
 
 def create_agent_package(version: str, version_dir: Path, agent_exe: Path) -> Path:
-    artifact = version_dir / "bin" / f"OrderCollectorAgent_{version}.zip"
+    artifact = version_dir / "bin" / f"{COLLECTOR_AGENT_DISPLAY_NAME}_{version}.zip"
     if artifact.exists():
         artifact.unlink()
+    for legacy_name in LEGACY_COLLECTOR_AGENT_DISPLAY_NAMES:
+        legacy_artifact = version_dir / "bin" / f"{legacy_name}_{version}.zip"
+        if legacy_artifact.exists():
+            legacy_artifact.unlink()
     with zipfile.ZipFile(artifact, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.write(agent_exe, agent_exe.name)
     return artifact
@@ -230,10 +236,10 @@ def build_collector_agent(version: str, version_dir: Path, log_file: Path) -> tu
         log_file,
     )
     if code != 0:
-        raise SystemExit(f"OrderCollectorAgent build failed. See log: {log_file}")
-    agent_exe = version_dir / "bin" / f"OrderCollectorAgent_{version}.exe"
+        raise SystemExit(f"打印组件信息采集 build failed. See log: {log_file}")
+    agent_exe = version_dir / "bin" / f"{COLLECTOR_AGENT_DISPLAY_NAME}_{version}.exe"
     if not agent_exe.exists():
-        raise SystemExit(f"OrderCollectorAgent executable not found: {agent_exe}")
+        raise SystemExit(f"打印组件信息采集 executable not found: {agent_exe}")
     agent_zip = create_agent_package(version, version_dir, agent_exe)
     return agent_exe, agent_zip
 

@@ -1,5 +1,5 @@
 {
-  "task_title": "v7.9.3 官方业务机采集助手 OrderCollectorAgent 重构",
+  "task_title": "v7.9.3 打印组件信息采集重构",
   "task_version": "7.9.3",
   "repository": "Ndlg/order-management-system",
   "status": "redirect_to_full_requirement",

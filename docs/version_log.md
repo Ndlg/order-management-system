@@ -69,3 +69,10 @@
 - 回归测试: 通过 (0)
 - 产物: OrderSystem_source_v7.9.3.zip, OrderCollectorAgent_v7.9.3.exe, OrderCollectorAgent_v7.9.3.zip, release_manifest.json
 - 说明: EXE 使用清晰小尺寸正式图标；限制单实例运行；修复停止服务后被残留心跳覆盖为重连中的问题。
+
+## v7.9.3 - 2026-06-07 03:09:25
+- 目录: `C:/Users/ndlgx/Documents/Projects/GitHub/Ndlg/order-management-system/versions/v7.9.3`
+- 拉取源码: skipped
+- 回归测试: 通过 (0)
+- 产物: OrderSystem_source_v7.9.3.zip, 打印组件信息采集_v7.9.3.exe, 打印组件信息采集_v7.9.3.zip, release_manifest.json
+- 说明: 用户侧程序名称和交付物名称改为“打印组件信息采集”。

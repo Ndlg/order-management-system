@@ -2,13 +2,13 @@
 
 当前版本：V7.9.3
 
-V7.9.3 将业务机采集端重构为官方配套工具 `OrderCollectorAgent`。采集助手只部署在业务机上读取本机打印组件数据库，并把原始打印任务完整回传到 Web 后端；它不做面单识别、不做筛选、不维护鞋款规则，也不生成整理 Excel。
+V7.9.3 将业务机采集端重构为官方配套工具“打印组件信息采集”。该工具只部署在业务机上读取本机打印组件数据库，并把原始打印任务完整回传到 Web 后端；它不做面单识别、不做筛选、不维护鞋款规则，也不生成整理 Excel。
 
 ## 目录结构
 
 - `src/core/`：订单整理、面单原文解析、采集助手后端持久化等核心逻辑。
 - `src/ui/`：FastAPI Web、Qt 入口、Web 模板和界面资源。
-- `src/plugins/collector_agent/`：官方业务机采集助手源码。
+- `src/plugins/collector_agent/`：官方“打印组件信息采集”源码。
 - `src/tests/`：单元测试与回归测试。
 - `data/input/`：原始测试输入，禁止直接改写生产原件。
 - `data/reference/`：尺码表、鞋款映射、采集样本等参考数据。
@@ -18,11 +18,11 @@ V7.9.3 将业务机采集端重构为官方配套工具 `OrderCollectorAgent`。
 - `scripts/`：构建、迁移和清理脚本。
 - `tmp/`：临时构建和测试中间文件。
 
-## 业务机采集助手
+## 打印组件信息采集
 
 源码位置：`src/plugins/collector_agent/`
 
-运行定位：业务机独立轻量 EXE / 后台采集服务 / 简易界面。业务机只需要拿 `versions/vX.Y.Z/bin/OrderCollectorAgent_vX.Y.Z.zip` 或对应 EXE，不需要源码目录、测试数据或生产数据。
+运行定位：业务机独立轻量 EXE / 后台采集服务 / 简易界面。业务机只需要拿 `versions/vX.Y.Z/bin/打印组件信息采集_vX.Y.Z.zip` 或对应 EXE，不需要源码目录、测试数据或生产数据。
 
 核心规则：
 
@@ -40,7 +40,7 @@ V7.9.3 将业务机采集端重构为官方配套工具 `OrderCollectorAgent`。
 
 ## Web 接口
 
-采集助手主接口统一使用 `/api/collector/*`：
+打印组件信息采集主接口统一使用 `/api/collector/*`：
 
 - `POST /api/collector/register`
 - `POST /api/collector/poll`
@@ -49,7 +49,7 @@ V7.9.3 将业务机采集端重构为官方配套工具 `OrderCollectorAgent`。
 - `GET /api/collector/records`
 - `GET /api/collector/version-info`
 
-旧的 Web“开始监听 / 结束监听”按钮仍可使用，它们会通过新 poll 指令驱动业务机采集助手。
+旧的 Web“开始监听 / 结束监听”按钮仍可使用，它们会通过新 poll 指令驱动打印组件信息采集。
 
 ## 构建
 
@@ -59,7 +59,7 @@ V7.9.3 将业务机采集端重构为官方配套工具 `OrderCollectorAgent`。
 python scripts/build_version.py 7.9.3 --build-exe --build-agent
 ```
 
-只构建业务机采集助手：
+只构建打印组件信息采集：
 
 ```powershell
 python scripts/build_collector_agent.py --version 7.9.3 --output-dir versions/v7.9.3/bin

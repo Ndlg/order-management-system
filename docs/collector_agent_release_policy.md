@@ -1,6 +1,6 @@
-# 业务机采集助手发布策略
+# 打印组件信息采集发布策略
 
-从 V7.9.3 开始，每次订单整理系统发布新版本时，都必须声明业务机采集助手版本状态。
+从 V7.9.3 开始，每次订单整理系统发布新版本时，都必须声明“打印组件信息采集”版本状态。
 
 ## 需要重新构建采集助手的情况
 
@@ -12,14 +12,14 @@
 
 重新构建时，版本目录必须包含：
 
-- `versions/vX.Y.Z/bin/OrderCollectorAgent_vX.Y.Z.exe`
-- `versions/vX.Y.Z/bin/OrderCollectorAgent_vX.Y.Z.zip`
+- `versions/vX.Y.Z/bin/打印组件信息采集_vX.Y.Z.exe`
+- `versions/vX.Y.Z/bin/打印组件信息采集_vX.Y.Z.zip`
 - `versions/vX.Y.Z/release_manifest.json`
 - `versions/vX.Y.Z/tests/report.log`
 
 ## 不需要重新构建采集助手的情况
 
-如果主系统升级但采集助手代码和协议没有变化，可以不重新打包业务机 EXE，但必须在 `release_manifest.json` 中记录兼容的采集助手版本，并在版本说明中写明业务机无需升级。
+如果主系统升级但“打印组件信息采集”代码和协议没有变化，可以不重新打包业务机 EXE，但必须在 `release_manifest.json` 中记录兼容的采集端版本，并在版本说明中写明业务机无需升级。
 
 ## 协议字段
 

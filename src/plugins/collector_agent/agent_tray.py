@@ -43,7 +43,12 @@ def open_logs_dir() -> None:
 
 def startup_shortcut_path() -> Path:
     startup = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
-    return startup / "OrderCollectorAgent.cmd"
+    return startup / "打印组件信息采集.cmd"
+
+
+def legacy_startup_shortcut_paths() -> list[Path]:
+    startup = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+    return [startup / "OrderCollectorAgent.cmd"]
 
 
 def enable_startup(executable: str | None = None) -> Path:
@@ -52,18 +57,21 @@ def enable_startup(executable: str | None = None) -> Path:
     exe = executable or sys.executable
     path = startup_shortcut_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    for legacy_path in legacy_startup_shortcut_paths():
+        if legacy_path.exists():
+            legacy_path.unlink()
     path.write_text(f'@echo off\nstart "" "{exe}" --minimized\n', encoding="utf-8")
     return path
 
 
 def disable_startup() -> None:
-    path = startup_shortcut_path()
-    if path.exists():
-        path.unlink()
+    for path in [startup_shortcut_path(), *legacy_startup_shortcut_paths()]:
+        if path.exists():
+            path.unlink()
 
 
 def startup_enabled() -> bool:
-    return startup_shortcut_path().exists()
+    return any(path.exists() for path in [startup_shortcut_path(), *legacy_startup_shortcut_paths()])
 
 
 class AgentTray:
@@ -95,9 +103,9 @@ class AgentTray:
         import pystray
 
         self.icon = pystray.Icon(
-            "OrderCollectorAgent",
+            "打印组件信息采集",
             self._image(),
-            "订单整理系统 - 业务机采集助手",
+            "打印组件信息采集",
             self._menu(),
         )
         self.thread = threading.Thread(target=self.icon.run, name="collector-agent-tray", daemon=True)

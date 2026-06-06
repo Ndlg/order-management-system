@@ -5,7 +5,7 @@
 - `src/`：主程序源码。
 - `src/core/`：核心逻辑，包括订单解析、合并、统计、面单解析和采集助手后端存储。
 - `src/ui/`：前端界面，包括 FastAPI Web、Qt 入口、Qt 公共组件和 UI 资源。
-- `src/plugins/collector_agent/`：官方业务机采集助手 `OrderCollectorAgent` 源码。
+- `src/plugins/collector_agent/`：官方“打印组件信息采集”源码，内部模块名仍为 `OrderCollectorAgent`。
 - `src/utils/`：工具函数和通用模块。
 - `src/tests/`：单元测试和回归测试。
 - `data/input/`：原始订单文件、图片、采集样本等输入数据，禁止直接修改生产原件。
@@ -38,20 +38,20 @@ versions/v7.9.3/
 规则：
 
 - 所有版本产物必须进入 `versions/vX.Y.Z/`。
-- `bin/` 只放生产交付物，例如主系统 EXE、`OrderSystem_vX.Y.Z.zip`、`OrderCollectorAgent_vX.Y.Z.exe`、`OrderCollectorAgent_vX.Y.Z.zip`。
+- `bin/` 只放生产交付物，例如主系统 EXE、`OrderSystem_vX.Y.Z.zip`、`打印组件信息采集_vX.Y.Z.exe`、`打印组件信息采集_vX.Y.Z.zip`。
 - `source/` 只放源码快照，用于回溯和审计，不作为业务机交付包。
 - `logs/` 写入 `YYYYMMDD_HHMMSS.log`。
 - `tests/` 写入测试数据副本和 `report.log`。
 - `release_manifest.json` 必须声明主系统版本、采集助手版本、协议版本和业务机是否需要升级。
 - 临时文件只能放到 `tmp/` 或版本目录，构建结束后应清理中间目录。
 
-## 业务机采集助手规则
+## 打印组件信息采集规则
 
-- 官方名称：订单整理系统 - 业务机采集助手。
+- 官方名称：打印组件信息采集。
 - 内部名称：`OrderCollectorAgent`。
 - 源码位置：`src/plugins/collector_agent/`。
 - 运行位置：业务机独立 EXE / 后台采集服务 / 简易界面。
-- 业务机交付物：只发 `OrderCollectorAgent_vX.Y.Z.zip` 或对应安装包。
+- 业务机交付物：只发 `打印组件信息采集_vX.Y.Z.zip` 或对应安装包。
 - 不得把源码、测试数据、生产 `data/` 打包给业务机。
 - 采集助手不做识别、不做筛选、不区分采集模式、不生成整理 Excel。
 - 每个进入批次范围的 `component_rowid` 至少上传一条记录。

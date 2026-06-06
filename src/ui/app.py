@@ -462,7 +462,7 @@ def api_collector_poll(payload: dict, authorization: str = Header(default="")):
     version = collector_agent_store.version_info()
     version["upgrade_required"] = command == "upgrade"
     if command == "upgrade":
-        version["upgrade_message"] = "业务机采集助手版本或协议不兼容，请升级后继续采集。"
+        version["upgrade_message"] = "打印组件信息采集版本或协议不兼容，请升级后继续采集。"
     return {
         "ok": True,
         "web_version": WEB_VERSION,

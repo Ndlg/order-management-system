@@ -731,13 +731,13 @@
               <label>监听打印机面单</label>
               <div class="monitor-box">
                 <div class="monitor-main">
-                  <div class="monitor-title">业务机采集助手同步本次打印信息原文</div>
+                  <div class="monitor-title">打印组件信息采集同步本次打印信息原文</div>
                   <div id="waybillDetail" class="monitor-detail">读取业务机监听状态中...</div>
                   <div id="waybillCollectors" class="collector-list" aria-live="polite"></div>
                   <div class="collector-register-row">
                     <span class="collector-register-label">业务机上线注册</span>
                     <span class="collector-register-badge">自动</span>
-                    <span class="collector-register-state">采集助手填写服务器地址后会自动注册，并在此显示在线状态</span>
+                    <span class="collector-register-state">打印组件信息采集填写服务器地址后会自动注册，并在此显示在线状态</span>
                   </div>
                   <div class="raw-record-box">
                     <div id="collectorRawRecords" class="raw-record-list" aria-live="polite"></div>
@@ -1034,7 +1034,7 @@ function collectorUploadText(row) {
 function renderWaybillCollectors(collectors) {
   waybillCollectors.textContent = '';
   if (!collectors.length) {
-    appendText(waybillCollectors, 'collector-empty', '暂无业务机连接。业务机采集助手连上服务器后，会自动新增到这里。');
+    appendText(waybillCollectors, 'collector-empty', '暂无业务机连接。打印组件信息采集连上服务器后，会自动新增到这里。');
     return;
   }
 
@@ -1104,7 +1104,7 @@ async function refreshWaybillStatus() {
           : `未启动。${collectorText}。有历史原始/识别文件可下载（原始 ${d.last_raw_count || 0} 条，识别 ${d.last_processed_count || 0} 条），不会自动参与本次生成`
       );
     } else {
-      setWaybillText(`未启动。${collectorText}。点击开始后由业务机采集助手记录本机打印基准`);
+      setWaybillText(`未启动。${collectorText}。点击开始后由打印组件信息采集记录本机打印基准`);
     }
   } catch (e) {
     setWaybillButtons(false);

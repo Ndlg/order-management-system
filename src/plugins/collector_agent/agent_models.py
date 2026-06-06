@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 
-OFFICIAL_NAME = "订单整理系统 - 业务机采集助手"
+OFFICIAL_NAME = "打印组件信息采集"
 INTERNAL_NAME = "OrderCollectorAgent"
 AGENT_VERSION = "7.9.3"
 PROTOCOL_VERSION = "collector.v1"

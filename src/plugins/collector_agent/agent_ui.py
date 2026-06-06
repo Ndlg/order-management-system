@@ -46,7 +46,7 @@ def state_from_response(response: dict[str, Any]) -> dict[str, Any]:
             }
         )
     elif command == "upgrade":
-        state.update({"current_status": "需要升级", "current_task": "等待升级", "detail": response.get("upgrade_message") or "采集助手版本需要升级"})
+        state.update({"current_status": "需要升级", "current_task": "等待升级", "detail": response.get("upgrade_message") or "打印组件信息采集版本需要升级"})
     return state
 
 
@@ -172,7 +172,7 @@ class SettingsDialog(tk.Toplevel):
     def __init__(self, parent: "AgentWindow"):
         super().__init__(parent)
         self.parent = parent
-        self.title("采集助手设置")
+        self.title("打印组件信息采集设置")
         self.resizable(False, False)
         self.config_data = load_config()
         self.transient(parent)
@@ -300,7 +300,7 @@ class AgentWindow(tk.Tk):
         style.configure("Status.TLabel", font=("Microsoft YaHei UI", 18, "bold"))
         root = ttk.Frame(self, padding=18)
         root.pack(fill="both", expand=True)
-        ttk.Label(root, text="业务机采集助手", style="Title.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(root, text="打印组件信息采集", style="Title.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(root, text=f"版本 {AGENT_VERSION}", foreground="#64748b").grid(row=0, column=1, sticky="e")
 
         status = ttk.Frame(root, padding=(0, 16, 0, 8))
@@ -383,7 +383,7 @@ class AgentWindow(tk.Tk):
 
     def hide_to_tray(self) -> None:
         self.withdraw()
-        self.tray.notify("采集助手仍在运行", "已最小化到系统托盘，后台继续待命。")
+        self.tray.notify("打印组件信息采集仍在运行", "已最小化到系统托盘，后台继续待命。")
 
     def show_window(self) -> None:
         self.after(0, self._show_window)
