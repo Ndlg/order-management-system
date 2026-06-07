@@ -192,6 +192,45 @@ class CollectorAgentTest(unittest.TestCase):
             self.assertNotIn("绑定码", html)
             self.assertNotIn("bind-code", html)
 
+    def test_stale_offline_collectors_are_purged_from_client_list(self) -> None:
+        with RuntimeEnv():
+            from core import collector_agent_store
+            from ui import app as web_app
+
+            collector_agent_store.save_agents(
+                {
+                    "old-agent": {
+                        "client_id": "old-agent",
+                        "machine_label": "old",
+                        "last_seen": "2000-01-01T00:00:00Z",
+                    },
+                    "new-agent": {
+                        "client_id": "new-agent",
+                        "machine_label": "new",
+                        "last_seen": collector_agent_store.utc_now_text(),
+                    },
+                }
+            )
+            web_app.WAYBILL_REMOTE_STATE.update(
+                {
+                    "status": "idle",
+                    "batch_id": "",
+                    "collectors": {
+                        "old-memory": {"client_id": "old-memory", "machine_label": "old-memory", "last_seen": "2000-01-01 00:00:00"},
+                        "new-memory": {"client_id": "new-memory", "machine_label": "new-memory", "last_seen": web_app.current_time_text()},
+                    },
+                    "uploads": {},
+                }
+            )
+
+            rows = web_app.public_waybill_collectors()
+            ids = {row.get("client_id") for row in rows}
+            self.assertNotIn("old-agent", ids)
+            self.assertNotIn("old-memory", ids)
+            self.assertIn("new-agent", ids)
+            self.assertIn("new-memory", ids)
+            self.assertNotIn("old-agent", collector_agent_store.load_agents())
+
     def test_pending_upload_written_on_failure_and_cleaned_after_success(self) -> None:
         with RuntimeEnv() as root:
             db_path = root / "CloudPrintClient" / "resources" / "print.db"

@@ -16,6 +16,7 @@ COLLECTOR_PROTOCOL_VERSION = "collector.v1"
 LATEST_AGENT_VERSION = "7.9.3"
 MIN_SUPPORTED_AGENT_VERSION = "7.9.3"
 COLLECTOR_ONLINE_SECONDS = 30
+COLLECTOR_OFFLINE_PURGE_SECONDS = 10 * 60
 RAW_RECORDS_FILENAME = "collector_raw_records.jsonl"
 UPLOAD_LOGS_FILENAME = "collector_upload_logs.jsonl"
 NO_PRINT_TEXT_PLACEHOLDER = "[未提取到打印文字，已保留原始打印任务]"
@@ -153,6 +154,23 @@ def save_agents(agents: dict[str, dict[str, Any]]) -> None:
     write_json_atomic(agents_path(), agents)
 
 
+def agent_is_expired(row: dict[str, Any], max_age_seconds: int = COLLECTOR_OFFLINE_PURGE_SECONDS) -> bool:
+    dt = parse_time(row.get("last_seen") or row.get("updated_at"))
+    if not dt:
+        return False
+    return (datetime.now(timezone.utc) - dt).total_seconds() > max_age_seconds
+
+
+def purge_expired_agents(max_age_seconds: int = COLLECTOR_OFFLINE_PURGE_SECONDS) -> list[str]:
+    agents = load_agents()
+    expired = [client_id for client_id, row in agents.items() if isinstance(row, dict) and agent_is_expired(row, max_age_seconds)]
+    if expired:
+        for client_id in expired:
+            agents.pop(client_id, None)
+        save_agents(agents)
+    return expired
+
+
 def version_info(download_url: str = "") -> dict[str, Any]:
     return {
         "server_version": LATEST_AGENT_VERSION,
@@ -277,6 +295,7 @@ def public_agent(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_agents_public() -> list[dict[str, Any]]:
+    purge_expired_agents()
     rows = [public_agent(row) for row in load_agents().values()]
     return sorted(rows, key=lambda item: (not item.get("online"), str(item.get("machine_label") or item.get("client_id"))))
 

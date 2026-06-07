@@ -50,6 +50,7 @@ WAYBILL_REMOTE_STATE = {
     "uploads": {},
 }
 WAYBILL_COLLECTOR_ONLINE_SECONDS = 20
+WAYBILL_COLLECTOR_PURGE_SECONDS = collector_agent_store.COLLECTOR_OFFLINE_PURGE_SECONDS
 WAYBILL_STOP_WAIT_SECONDS = 8
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -149,7 +150,30 @@ def collector_is_online(collector, max_age_seconds=WAYBILL_COLLECTOR_ONLINE_SECO
     return (datetime.now() - seen).total_seconds() <= max_age_seconds
 
 
+def collector_is_expired(collector, max_age_seconds=WAYBILL_COLLECTOR_PURGE_SECONDS):
+    seen = parse_time_text(collector.get("last_seen") or collector.get("uploaded_at"))
+    if not seen:
+        return False
+    return (datetime.now() - seen).total_seconds() > max_age_seconds
+
+
+def purge_stale_waybill_collectors():
+    removed = set(collector_agent_store.purge_expired_agents(WAYBILL_COLLECTOR_PURGE_SECONDS))
+    collectors = WAYBILL_REMOTE_STATE.setdefault("collectors", {})
+    for client_id, row in list(collectors.items()):
+        if client_id in removed or collector_is_expired(row):
+            collectors.pop(client_id, None)
+    uploads = WAYBILL_REMOTE_STATE.setdefault("uploads", {})
+    active_batch = bool(WAYBILL_REMOTE_STATE.get("batch_id")) and WAYBILL_REMOTE_STATE.get("status") in {"running", "stopping"}
+    if not active_batch:
+        for client_id, row in list(uploads.items()):
+            if client_id in removed or collector_is_expired(row):
+                uploads.pop(client_id, None)
+    return removed
+
+
 def public_waybill_collectors():
+    purge_stale_waybill_collectors()
     uploads = WAYBILL_REMOTE_STATE.get("uploads", {})
     collector_items = WAYBILL_REMOTE_STATE.get("collectors", {})
     persisted_agents = {row.get("client_id"): row for row in collector_agent_store.list_agents_public() if row.get("client_id")}
