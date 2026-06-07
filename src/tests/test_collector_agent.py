@@ -178,6 +178,20 @@ class CollectorAgentTest(unittest.TestCase):
             self.assertEqual(len(listed), 2)
             self.assertEqual({str(row["component_rowid"]) for row in listed}, {"1", "2"})
 
+    def test_web_collector_entrypoints_use_register_not_binding_code(self) -> None:
+        with RuntimeEnv():
+            from ui import app as web_app
+
+            routes = {getattr(route, "path", "") for route in web_app.app.routes}
+            self.assertIn("/api/collector/register", routes)
+            self.assertNotIn("/api/collector/bind-code", routes)
+            self.assertNotIn("/api/collector/bind", routes)
+
+            html = web_app.load_html("index.html")
+            self.assertIn("上线注册", html)
+            self.assertNotIn("绑定码", html)
+            self.assertNotIn("bind-code", html)
+
     def test_pending_upload_written_on_failure_and_cleaned_after_success(self) -> None:
         with RuntimeEnv() as root:
             db_path = root / "CloudPrintClient" / "resources" / "print.db"
